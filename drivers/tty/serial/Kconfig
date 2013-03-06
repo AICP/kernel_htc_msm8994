@@ -1058,6 +1058,11 @@ config SERIAL_MSM_HS_BRCM
 	  Choose M here to compile it as a module. The module will be
 	  called msm_serial_hs_brcm.
 
+config SERIAL_MSM_HS_NO_DMA_WAKELOCK
+        bool "Disable msm_serial_hs_dma wakelock for MSM UART High Speed: Serial Driver"
+        depends on SERIAL_MSM_HS_BRCM=y
+        default n
+
 config SERIAL_MSM_RX_WAKEUP
 	bool "Wakeup the msm uart clock on GPIO activity."
 	depends on SERIAL_MSM_CLOCK_CONTROL
