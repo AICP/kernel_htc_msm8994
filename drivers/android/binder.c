@@ -1192,7 +1192,7 @@ static void binder_do_set_priority(struct task_struct *task,
 
 		if (max_rtprio == 0) {
 			policy = SCHED_NORMAL;
-			priority = -20;
+			priority = MIN_NICE;
 		} else if (priority > max_rtprio) {
 			priority = max_rtprio;
 		}
