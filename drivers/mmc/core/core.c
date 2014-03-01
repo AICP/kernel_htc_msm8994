@@ -82,7 +82,12 @@ enum {
 };
 #endif
 
-bool use_spi_crc = 1;
+/*
+ * Enabling software CRCs on the data blocks can be a significant (30%)
+ * performance cost, and for other reasons may not always be desired.
+ * So we allow it it to be disabled.
+ */
+bool use_spi_crc = 0;
 module_param(use_spi_crc, bool, 0);
 
 #ifdef CONFIG_MMC_UNSAFE_RESUME
