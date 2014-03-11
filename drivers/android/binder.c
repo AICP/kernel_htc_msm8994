@@ -1201,7 +1201,7 @@ static void binder_do_set_priority(struct task_struct *task,
 	if (verify && is_fair_policy(policy) && !has_cap_nice) {
 		long min_nice = 20 - task_rlimit(task, RLIMIT_NICE);
 
-		if (min_nice > 19) {
+		if (min_nice > MAX_NICE) {
 			binder_user_error("%d RLIMIT_NICE not set\n",
 					  task->pid);
 			return;
