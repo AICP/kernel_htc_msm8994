@@ -464,7 +464,7 @@ static void log_store(int facility, int level,
 	else
 		msg->ts_nsec = local_clock();
 	memset(log_dict(msg) + dict_len, 0, pad_len);
-	msg->len = sizeof(struct printk_log) + text_len + dict_len + pad_len;
+	msg->len = size;
 
 	/* insert message */
 	log_last_valid_idx = log_next_idx;
