@@ -552,5 +552,7 @@ int q6asm_send_mtmx_strtr_window(struct audio_client *ac,
 		struct asm_session_mtmx_strtr_param_window_v2_t *window_param,
 		uint32_t param_id);
 
+/* Retrieve the current DSP path delay */
+int q6asm_get_path_delay(struct audio_client *ac);
 
 #endif /* __Q6_ASM_H__ */
