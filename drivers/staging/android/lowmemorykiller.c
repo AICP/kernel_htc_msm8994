@@ -580,7 +580,7 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 		 * infrastructure. There is no real reason why the selected
 		 * task should have access to the memory reserves.
 		 */
-		mark_tsk_oom_victim(selected);
+		mark_oom_victim(selected);
 		send_sig(SIGKILL, selected, 0);
 		set_tsk_thread_flag(selected, TIF_MEMDIE);
 		rem -= selected_tasksize;
