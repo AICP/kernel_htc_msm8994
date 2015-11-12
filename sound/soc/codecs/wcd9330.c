@@ -7614,7 +7614,7 @@ static const struct wcd9xxx_reg_mask_val tomtom_reg_defaults[] = {
 	TOMTOM_REG_VAL(TOMTOM_A_CDC_CLK_OTHR_CTL, 0x00),
 	TOMTOM_REG_VAL(TOMTOM_A_CDC_MAD_INP_SEL, 0x01),
 
-	
+	/* Set HPH Path to low power mode */
 	TOMTOM_REG_VAL(TOMTOM_A_RX_HPH_BIAS_PA, 0x57),
 
 	
