@@ -1053,7 +1053,6 @@ source "drivers/input/touchscreen/synaptics_dsx_htc/Kconfig"
 
 config TOUCHSCREEN_TOUCH_FW_UPDATE
         tristate "Touchscreen firmware update"
-        default y
         help
           Say Y here to support touch firmware update
 
