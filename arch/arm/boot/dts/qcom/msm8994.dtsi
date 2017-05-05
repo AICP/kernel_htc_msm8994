@@ -3333,6 +3333,15 @@
 		};
 	};
 
+	qcom,bcl {
+		/delete-property/ qcom,bcl-hotplug-list;
+		/delete-property/ qcom,bcl-soc-hotplug-list;
+		qcom,ibat-monitor {
+			qcom,soc-low-threshold = <5>;
+			qcom,mitigation-freq-khz = <1248000>;
+		};
+	};
+
     cnss: qcom,cnss@06300000 {
             compatible = "qcom,cnss";
             reg = <0x06300000 0x200000>;
