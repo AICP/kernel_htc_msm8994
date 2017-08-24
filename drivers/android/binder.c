@@ -2123,9 +2123,7 @@ static void binder_cleanup_transaction(struct binder_transaction *t,
 		binder_debug(BINDER_DEBUG_DEAD_TRANSACTION,
 			"undelivered transaction %d, %s\n",
 			t->debug_id, reason);
-			t->buffer->transaction = NULL;
-			kfree(t);
-			binder_stats_deleted(BINDER_STAT_TRANSACTION);
+		binder_free_transaction(t);
 	}
 }
 
@@ -4172,12 +4170,20 @@ retry:
 		if (put_user(cmd, (uint32_t __user *)ptr)) {
 			if (t_from)
 				binder_thread_dec_tmpref(t_from);
+
+			binder_cleanup_transaction(t, "put_user failed",
+						   BR_FAILED_REPLY);
+
 			return -EFAULT;
 		}
 		ptr += sizeof(uint32_t);
 		if (copy_to_user(ptr, &tr, sizeof(tr))) {
 			if (t_from)
 				binder_thread_dec_tmpref(t_from);
+
+			binder_cleanup_transaction(t, "copy_to_user failed",
+						   BR_FAILED_REPLY);
+
 			return -EFAULT;
 		}
 		ptr += sizeof(tr);
