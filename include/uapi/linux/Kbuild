@@ -488,3 +488,4 @@ header-y += tsc.h
 header-y += danipc_ioctl.h
 header-y += shub_ctrl.h
 header-y += minifb.h
+header-y += tfa9895.h
