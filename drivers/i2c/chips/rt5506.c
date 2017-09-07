@@ -33,7 +33,7 @@
 #include <linux/jiffies.h>
 #include <linux/of_gpio.h>
 #include <sound/htc_acoustic_alsa.h>
-#include "rt5506.h"
+#include <linux/rt5506.h>
 #include <linux/htc_headset_mgr.h>
 
 #undef pr_info
