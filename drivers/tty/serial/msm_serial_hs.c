@@ -2154,10 +2154,18 @@ void toggle_wakeup_interrupt(struct msm_hs_port *msm_uport)
 		MSM_HS_DBG("%s(): Enable Wakeup IRQ", __func__);
 		spin_lock_irqsave(&uport->lock, flags);
 		msm_uport->wakeup.ignore = 1;
-		msm_uport->wakeup.enabled = true;
+		/* Keep this disabled for 1 msec */
+		msm_uport->wakeup.enabled = false;
 		spin_unlock_irqrestore(&uport->lock, flags);
 		disable_irq(uport->irq);
 		enable_irq(msm_uport->wakeup.irq);
+
+		/* Add delay before enabling wakeup irq */
+		udelay(1000);
+		spin_lock_irqsave(&uport->lock, flags);
+		if (msm_uport->wakeup.ignore == 1)
+			msm_uport->wakeup.enabled = true;
+		spin_unlock_irqrestore(&uport->lock, flags);
 	} else {
 		disable_irq_nosync(msm_uport->wakeup.irq);
 		enable_irq(uport->irq);
@@ -2255,6 +2263,10 @@ static irqreturn_t msm_hs_wakeup_isr(int irq, void *dev)
 	struct tty_struct *tty = NULL;
 
 	msm_hs_resource_vote(msm_uport);
+	/* Do not serve ISR if this flag is false */
+	if (!msm_uport->wakeup.enabled)
+		return IRQ_HANDLED;
+
 	spin_lock_irqsave(&uport->lock, flags);
 
 	MSM_HS_DBG("%s(): ignore %d\n", __func__,
