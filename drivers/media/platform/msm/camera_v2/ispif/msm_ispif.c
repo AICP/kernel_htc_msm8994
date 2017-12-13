@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -50,7 +50,14 @@
 #define CDBG(fmt, args...) do { } while (0)
 #endif
 
+int msm_ispif_get_clk_info(struct ispif_device *ispif_dev,
+	struct platform_device *pdev,
+	struct msm_cam_clk_info *ahb_clk_info,
+	struct msm_cam_clk_info *clk_info);
+
+//HTC_START, for subcam no ack issue
 int g_subcam_vfe_intf = 0;
+//HTC_END
 
 static void msm_ispif_io_dump_reg(struct ispif_device *ispif)
 {
@@ -86,45 +93,29 @@ static struct msm_cam_clk_info ispif_8626_reset_clk_info[] = {
 	{"camss_csi_vfe_clk", NO_SET_RATE},
 };
 
-static struct msm_cam_clk_info ispif_8974_ahb_clk_info[ISPIF_CLK_INFO_MAX];
-
-static struct msm_cam_clk_info ispif_8974_reset_clk_info[] = {
-	{"csi0_src_clk", INIT_RATE},
-	{"csi0_clk", NO_SET_RATE},
-	{"csi0_pix_clk", NO_SET_RATE},
-	{"csi0_rdi_clk", NO_SET_RATE},
-	{"csi1_src_clk", INIT_RATE},
-	{"csi1_clk", NO_SET_RATE},
-	{"csi1_pix_clk", NO_SET_RATE},
-	{"csi1_rdi_clk", NO_SET_RATE},
-	{"csi2_src_clk", INIT_RATE},
-	{"csi2_clk", NO_SET_RATE},
-	{"csi2_pix_clk", NO_SET_RATE},
-	{"csi2_rdi_clk", NO_SET_RATE},
-	{"csi3_src_clk", INIT_RATE},
-	{"csi3_clk", NO_SET_RATE},
-	{"csi3_pix_clk", NO_SET_RATE},
-	{"csi3_rdi_clk", NO_SET_RATE},
-	{"vfe0_clk_src", INIT_RATE},
-	{"camss_vfe_vfe0_clk", NO_SET_RATE},
-	{"camss_csi_vfe0_clk", NO_SET_RATE},
-	{"vfe1_clk_src", INIT_RATE},
-	{"camss_vfe_vfe1_clk", NO_SET_RATE},
-	{"camss_csi_vfe1_clk", NO_SET_RATE},
-};
+static struct msm_cam_clk_info ispif_ahb_clk_info[ISPIF_CLK_INFO_MAX];
+static struct msm_cam_clk_info ispif_clk_info[ISPIF_CLK_INFO_MAX];
 
 static int msm_ispif_reset_hw(struct ispif_device *ispif)
 {
 	int rc = 0;
 	long timeout = 0;
-	struct clk *reset_clk[ARRAY_SIZE(ispif_8974_reset_clk_info)];
 	struct clk *reset_clk1[ARRAY_SIZE(ispif_8626_reset_clk_info)];
 	ispif->clk_idx = 0;
 
-	rc = msm_cam_clk_enable(&ispif->pdev->dev,
-		ispif_8974_reset_clk_info, reset_clk,
-		ARRAY_SIZE(ispif_8974_reset_clk_info), 1);
+	rc = msm_ispif_get_clk_info(ispif, ispif->pdev,
+		ispif_ahb_clk_info, ispif_clk_info);
 	if (rc < 0) {
+		pr_err("%s: msm_isp_get_clk_info() failed", __func__);
+			return -EFAULT;
+	}
+
+	rc = msm_cam_clk_enable(&ispif->pdev->dev,
+		ispif_clk_info, ispif->clk,
+		ispif->num_clk, 1);
+	if (rc < 0) {
+		pr_err("%s: cannot enable clock, error = %d\n",
+			__func__, rc);
 		rc = msm_cam_clk_enable(&ispif->pdev->dev,
 			ispif_8626_reset_clk_info, reset_clk1,
 			ARRAY_SIZE(ispif_8626_reset_clk_info), 1);
@@ -132,11 +123,11 @@ static int msm_ispif_reset_hw(struct ispif_device *ispif)
 			pr_err("%s: cannot enable clock, error = %d",
 				__func__, rc);
 		} else {
-			
+			/* This is set when device is 8x26 */
 			ispif->clk_idx = 2;
 		}
 	} else {
-		
+		/* This is set when device is 8974 */
 		ispif->clk_idx = 1;
 	}
 
@@ -144,12 +135,10 @@ static int msm_ispif_reset_hw(struct ispif_device *ispif)
 	if (ispif->hw_num_isps > 1)
 		init_completion(&ispif->reset_complete[VFE1]);
 
-	
+	/* initiate reset of ISPIF */
 	msm_camera_io_w(ISPIF_RST_CMD_MASK,
 				ispif->base + ISPIF_RST_CMD_ADDR);
-	if (ispif->hw_num_isps > 1)
-		msm_camera_io_w(ISPIF_RST_CMD_1_MASK,
-					ispif->base + ISPIF_RST_CMD_1_ADDR);
+
 
 	timeout = wait_for_completion_timeout(
 			&ispif->reset_complete[VFE0], msecs_to_jiffies(500));
@@ -158,8 +147,8 @@ static int msm_ispif_reset_hw(struct ispif_device *ispif)
 	if (timeout <= 0) {
 		pr_err("%s: VFE0 reset wait timeout\n", __func__);
 		rc = msm_cam_clk_enable(&ispif->pdev->dev,
-			ispif_8974_reset_clk_info, reset_clk,
-			ARRAY_SIZE(ispif_8974_reset_clk_info), 0);
+			ispif_clk_info, ispif->clk,
+			ispif->num_clk, 0);
 		if (rc < 0) {
 			rc = msm_cam_clk_enable(&ispif->pdev->dev,
 				ispif_8626_reset_clk_info, reset_clk1,
@@ -172,23 +161,25 @@ static int msm_ispif_reset_hw(struct ispif_device *ispif)
 	}
 
 	if (ispif->hw_num_isps > 1) {
+		msm_camera_io_w(ISPIF_RST_CMD_1_MASK,
+					ispif->base + ISPIF_RST_CMD_1_ADDR);
 		timeout = wait_for_completion_timeout(
 				&ispif->reset_complete[VFE1],
 				msecs_to_jiffies(500));
 		CDBG("%s: VFE1 done\n", __func__);
 		if (timeout <= 0) {
 			pr_err("%s: VFE1 reset wait timeout\n", __func__);
-			msm_cam_clk_enable(&ispif->pdev->dev,
-				ispif_8974_reset_clk_info, reset_clk,
-				ARRAY_SIZE(ispif_8974_reset_clk_info), 0);
+		rc = msm_cam_clk_enable(&ispif->pdev->dev,
+			ispif_clk_info, ispif->clk,
+			ispif->num_clk, 0);
 			return -ETIMEDOUT;
 		}
 	}
 
 	if (ispif->clk_idx == 1) {
 		rc = msm_cam_clk_enable(&ispif->pdev->dev,
-			ispif_8974_reset_clk_info, reset_clk,
-			ARRAY_SIZE(ispif_8974_reset_clk_info), 0);
+			ispif_clk_info, ispif->clk,
+			ispif->num_clk, 0);
 		if (rc < 0) {
 			pr_err("%s: cannot disable clock, error = %d",
 				__func__, rc);
@@ -208,13 +199,14 @@ static int msm_ispif_reset_hw(struct ispif_device *ispif)
 	return rc;
 }
 
-int msm_ispif_get_ahb_clk_info(struct ispif_device *ispif_dev,
+int msm_ispif_get_clk_info(struct ispif_device *ispif_dev,
 	struct platform_device *pdev,
-	struct msm_cam_clk_info *ahb_clk_info)
+	struct msm_cam_clk_info *ahb_clk_info,
+	struct msm_cam_clk_info *clk_info)
 {
 	uint32_t count, num_ahb_clk = 0;
+	const char *rate = NULL;
 	int i, rc;
-	uint32_t rates[ISPIF_CLK_INFO_MAX];
 
 	struct device_node *of_node;
 	of_node = pdev->dev.of_node;
@@ -233,31 +225,47 @@ int msm_ispif_get_ahb_clk_info(struct ispif_device *ispif_dev,
 		return -EINVAL;
 	}
 
-	rc = of_property_read_u32_array(of_node, "qcom,clock-rates",
-		rates, count);
-	if (rc < 0) {
-		pr_err("%s failed %d\n", __func__, __LINE__);
-		return rc;
-	}
 	for (i = 0; i < count; i++) {
 		rc = of_property_read_string_index(of_node, "clock-names",
-				i, &(ahb_clk_info[num_ahb_clk].clk_name));
-		CDBG("clock-names[%d] = %s\n",
-			 i, ahb_clk_info[i].clk_name);
+				i, &(clk_info[i].clk_name));
 		if (rc < 0) {
-			pr_err("%s failed %d\n", __func__, __LINE__);
+			pr_err("%s reading clock-name failed index %d\n",
+				__func__, i);
 			return rc;
 		}
-		if (strnstr(ahb_clk_info[num_ahb_clk].clk_name, "ahb",
-			sizeof(ahb_clk_info[num_ahb_clk].clk_name))) {
+
+		rc = of_property_read_string_index(of_node, "qcom,clock-rates",
+			i, &rate);
+		CDBG("clock-names[%d] = %s, clk_rate = %s\n",
+			i, clk_info[i].clk_name, rate);
+		if (rc < 0) {
+			pr_err("%s reading clock-rate failed index %d\n",
+				__func__, i);
+			return rc;
+		}
+
+		if (!strcmp(rate, "-1") || !strcmp(rate, "0"))
+			clk_info[i].clk_rate = NO_SET_RATE;
+		else if (!strcmp(rate, "-2"))
+			clk_info[i].clk_rate = INIT_RATE;
+		else
+			rc = kstrtol(rate, 10, &clk_info[i].clk_rate);
+
+		if (strnstr(clk_info[i].clk_name, "ahb",
+			strlen(clk_info[i].clk_name))) {
+			ahb_clk_info[num_ahb_clk].clk_name =
+				clk_info[i].clk_name;
 			ahb_clk_info[num_ahb_clk].clk_rate =
-				(rates[i] == 0) ? (long)-1 : rates[i];
-			CDBG("clk_rate[%d] = %ld\n", i,
-				ahb_clk_info[i].clk_rate);
+				clk_info[i].clk_rate;
+			CDBG("clk_name[%d]= %s, clk_rate = %ld\n",
+				num_ahb_clk, ahb_clk_info[num_ahb_clk].clk_name,
+				ahb_clk_info[num_ahb_clk].clk_rate);
 			num_ahb_clk++;
 		}
 	}
+	CDBG("%s: num_ahb_clk %d num_clk %d\n", __func__, num_ahb_clk, count);
 	ispif_dev->num_ahb_clk = num_ahb_clk;
+	ispif_dev->num_clk = count;
 	return 0;
 }
 
@@ -266,19 +274,12 @@ static int msm_ispif_clk_ahb_enable(struct ispif_device *ispif, int enable)
 	int rc = 0;
 
 	if (ispif->csid_version < CSID_VERSION_V30) {
-		
+		/* Older ISPIF versiond don't need ahb clokc */
 		return 0;
 	}
 
-	rc = msm_ispif_get_ahb_clk_info(ispif, ispif->pdev,
-		ispif_8974_ahb_clk_info);
-	if (rc < 0) {
-		pr_err("%s: msm_isp_get_clk_info() failed", __func__);
-			return -EFAULT;
-	}
-
 	rc = msm_cam_clk_enable(&ispif->pdev->dev,
-		ispif_8974_ahb_clk_info, ispif->ahb_clk,
+		ispif_ahb_clk_info, ispif->ahb_clk,
 		ispif->num_ahb_clk, enable);
 	if (rc < 0) {
 		pr_err("%s: cannot enable clock, error = %d",
@@ -365,23 +366,23 @@ static void msm_ispif_sel_csid_core(struct ispif_device *ispif,
 	switch (intftype) {
 	case PIX0:
 		data &= ~(BIT(1) | BIT(0));
-		data |= csid;
+		data |= (uint32_t) csid;
 		break;
 	case RDI0:
 		data &= ~(BIT(5) | BIT(4));
-		data |= (csid << 4);
+		data |= ((uint32_t) csid) << 4;
 		break;
 	case PIX1:
 		data &= ~(BIT(9) | BIT(8));
-		data |= (csid << 8);
+		data |= ((uint32_t) csid) << 8;
 		break;
 	case RDI1:
 		data &= ~(BIT(13) | BIT(12));
-		data |= (csid << 12);
+		data |= ((uint32_t) csid) << 12;
 		break;
 	case RDI2:
 		data &= ~(BIT(21) | BIT(20));
-		data |= (csid << 20);
+		data |= ((uint32_t) csid) << 20;
 		break;
 	}
 
@@ -457,9 +458,9 @@ static void msm_ispif_enable_intf_cids(struct ispif_device *ispif,
 
 	data = msm_camera_io_r(ispif->base + intf_addr);
 	if (enable)
-		data |= cid_mask;
+		data |=  (uint32_t) cid_mask;
 	else
-		data &= ~cid_mask;
+		data &= ~((uint32_t) cid_mask);
 	msm_camera_io_w_mb(data, ispif->base + intf_addr);
 }
 
@@ -613,13 +614,13 @@ static int msm_ispif_config(struct ispif_device *ispif,
 
 		vfe_intf = params->entries[i].vfe_intf;
 
-		
-		if(params->entries[i].csid == 2)   
+		//HTC_START, for subcam no ack issue
+		if(params->entries[i].csid == 2)   //sub cam csid
 		{
 		    g_subcam_vfe_intf = vfe_intf;
 		    pr_info("[CAM]-sub, %s: sub cam vfe_intf %d\n", __func__, g_subcam_vfe_intf);
 		}
-		
+		//HTC_END
 
 		CDBG("%s intftype %x, vfe_intf %d, csid %d\n", __func__,
 			intftype, vfe_intf, params->entries[i].csid);
@@ -714,28 +715,28 @@ static void msm_ispif_intf_cmd(struct ispif_device *ispif, uint32_t cmd_bits,
 			cid = params->entries[i].cids[k];
 			vc = cid / 4;
 			if (intf_type == RDI2) {
-				
+				/* zero out two bits */
 				ispif->applied_intf_cmd[vfe_intf].intf_cmd1 &=
 					~(0x3 << (vc * 2 + 8));
-				
+				/* set cmd bits */
 				ispif->applied_intf_cmd[vfe_intf].intf_cmd1 |=
 					(cmd_bits << (vc * 2 + 8));
 			} else {
-				
+				/* zero 2 bits */
 				ispif->applied_intf_cmd[vfe_intf].intf_cmd &=
 					~(0x3 << (vc * 2 + intf_type * 8));
-				
+				/* set cmd bits */
 				ispif->applied_intf_cmd[vfe_intf].intf_cmd |=
 					(cmd_bits << (vc * 2 + intf_type * 8));
 			}
 		}
-		
+		/* cmd for PIX0, PIX1, RDI0, RDI1 */
 		if (ispif->applied_intf_cmd[vfe_intf].intf_cmd != 0xFFFFFFFF)
 			msm_camera_io_w_mb(
 				ispif->applied_intf_cmd[vfe_intf].intf_cmd,
 				ispif->base + ISPIF_VFE_m_INTF_CMD_0(vfe_intf));
 
-		
+		/* cmd for RDI2 */
 		if (ispif->applied_intf_cmd[vfe_intf].intf_cmd1 != 0xFFFFFFFF)
 			msm_camera_io_w_mb(
 				ispif->applied_intf_cmd[vfe_intf].intf_cmd1,
@@ -766,7 +767,7 @@ static int msm_ispif_stop_immediately(struct ispif_device *ispif,
 	}
 	msm_ispif_intf_cmd(ispif, ISPIF_INTF_CMD_DISABLE_IMMEDIATELY, params);
 
-	
+	/* after stop the interface we need to unmask the CID enable bits */
 	for (i = 0; i < params->num; i++) {
 		cid_mask = msm_ispif_get_cids_mask_from_cfg(
 			&params->entries[i]);
@@ -794,7 +795,6 @@ static int msm_ispif_start_frame_boundary(struct ispif_device *ispif,
 		rc = -EINVAL;
 		return rc;
 	}
-
 	msm_ispif_intf_cmd(ispif, ISPIF_INTF_CMD_ENABLE_FRAME_BOUNDARY, params);
 
 	return rc;
@@ -810,7 +810,6 @@ static int msm_ispif_restart_frame_boundary(struct ispif_device *ispif,
 	enum msm_ispif_vfe_intf vfe_intf;
 	uint32_t vfe_mask = 0;
 	uint32_t intf_addr;
-	struct clk *reset_clk[ARRAY_SIZE(ispif_8974_reset_clk_info)];
 
 	if (ispif->ispif_state != ISPIF_POWER_UP) {
 		pr_err("%s: ispif invalid state %d\n", __func__,
@@ -818,15 +817,26 @@ static int msm_ispif_restart_frame_boundary(struct ispif_device *ispif,
 		rc = -EPERM;
 		return rc;
 	}
+	if (params->num > MAX_PARAM_ENTRIES) {
+		pr_err("%s: invalid param entries %d\n", __func__,
+			params->num);
+		rc = -EINVAL;
+		return rc;
+	}
 
 	for (i = 0; i < params->num; i++) {
 		vfe_intf = params->entries[i].vfe_intf;
+		if (vfe_intf >= VFE_MAX) {
+			pr_err("%s: %d invalid i %d vfe_intf %d\n", __func__,
+				__LINE__, i, vfe_intf);
+			return -EINVAL;
+		}
 		vfe_mask |= (1 << vfe_intf);
 	}
 
 	rc = msm_cam_clk_enable(&ispif->pdev->dev,
-		ispif_8974_reset_clk_info, reset_clk,
-		ARRAY_SIZE(ispif_8974_reset_clk_info), 1);
+		ispif_clk_info, ispif->clk,
+		ispif->num_clk, 1);
 	if (rc < 0) {
 		pr_err("%s: cannot enable clock, error = %d",
 			__func__, rc);
@@ -836,7 +846,7 @@ static int msm_ispif_restart_frame_boundary(struct ispif_device *ispif,
 	if (vfe_mask & (1 << VFE0)) {
 		init_completion(&ispif->reset_complete[VFE0]);
 		pr_err("%s Init completion VFE0\n", __func__);
-			
+			/* initiate reset of ISPIF */
 		msm_camera_io_w(0x00001FF9,
 				ispif->base + ISPIF_RST_CMD_ADDR);
 	}
@@ -870,8 +880,8 @@ static int msm_ispif_restart_frame_boundary(struct ispif_device *ispif,
 
 	pr_info("%s: ISPIF reset hw done", __func__);
 	rc = msm_cam_clk_enable(&ispif->pdev->dev,
-		ispif_8974_reset_clk_info, reset_clk,
-		ARRAY_SIZE(ispif_8974_reset_clk_info), 0);
+		ispif_clk_info, ispif->clk,
+		ispif->num_clk, 0);
 	if (rc < 0) {
 		pr_err("%s: cannot enable clock, error = %d",
 			__func__, rc);
@@ -927,8 +937,8 @@ end:
 	return rc;
 disable_clk:
 	rc = msm_cam_clk_enable(&ispif->pdev->dev,
-		ispif_8974_reset_clk_info, reset_clk,
-		ARRAY_SIZE(ispif_8974_reset_clk_info), 0);
+		ispif_clk_info, ispif->clk,
+		ispif->num_clk, 0);
 	if (rc < 0) {
 		pr_err("%s: cannot enable clock, error = %d",
 		__func__, rc);
@@ -1011,7 +1021,7 @@ static int msm_ispif_stop_frame_boundary(struct ispif_device *ispif,
 		if (rc < 0)
 			goto end;
 
-		
+		/* disable CIDs in CID_MASK register */
 		msm_ispif_enable_intf_cids(ispif, params->entries[i].intftype,
 			cid_mask, vfe_intf, 0);
 	}
@@ -1135,15 +1145,13 @@ static irqreturn_t msm_io_ispif_irq(int irq_num, void *data)
 static int msm_ispif_set_vfe_info(struct ispif_device *ispif,
 	struct msm_ispif_vfe_info *vfe_info)
 {
-        if (!vfe_info || (vfe_info->num_vfe <= 0) ||
-	    ((uint32_t)(vfe_info->num_vfe) > VFE_MAX)) {
+	if (!vfe_info || (vfe_info->num_vfe <= 0) ||
+		((uint32_t)(vfe_info->num_vfe) > ispif->hw_num_isps)) {
 		pr_err("Invalid VFE info: %p %d\n", vfe_info,
-			   (vfe_info ? vfe_info->num_vfe:0));
- 		return -EINVAL;
+			(vfe_info ? vfe_info->num_vfe:0));
+		return -EINVAL;
 	}
-
 	memcpy(&ispif->vfe_info, vfe_info, sizeof(struct msm_ispif_vfe_info));
-
 	return 0;
 }
 
@@ -1161,7 +1169,7 @@ static int msm_ispif_init(struct ispif_device *ispif,
 		return rc;
 	}
 
-	
+	/* can we set to zero? */
 	ispif->applied_intf_cmd[VFE0].intf_cmd  = 0xFFFFFFFF;
 	ispif->applied_intf_cmd[VFE0].intf_cmd1 = 0xFFFFFFFF;
 	ispif->applied_intf_cmd[VFE1].intf_cmd  = 0xFFFFFFFF;
@@ -1200,13 +1208,13 @@ static int msm_ispif_init(struct ispif_device *ispif,
 		goto error_irq;
 	}
 
+	msm_ispif_reset_hw(ispif);
+
 	rc = msm_ispif_clk_ahb_enable(ispif, 1);
 	if (rc) {
 		pr_err("%s: ahb_clk enable failed", __func__);
 		goto error_ahb;
 	}
-
-	msm_ispif_reset_hw(ispif);
 
 	rc = msm_ispif_reset(ispif);
 	if (rc == 0) {
@@ -1239,9 +1247,9 @@ static void msm_ispif_release(struct ispif_device *ispif)
 		return;
 	}
 
-	
+	/* make sure no streaming going on */
 	msm_ispif_reset(ispif);
-
+	msm_ispif_reset_hw(ispif);
 	msm_ispif_clk_ahb_enable(ispif, 0);
 
 	free_irq(ispif->irq->start, ispif);
@@ -1251,6 +1259,7 @@ static void msm_ispif_release(struct ispif_device *ispif)
 	iounmap(ispif->clk_mux_base);
 
 	ispif->ispif_state = ISPIF_POWER_DOWN;
+
 }
 
 static long msm_ispif_cmd(struct v4l2_subdev *sd, void *arg)
@@ -1266,7 +1275,7 @@ static long msm_ispif_cmd(struct v4l2_subdev *sd, void *arg)
 	mutex_lock(&ispif->mutex);
 	switch (pcdata->cfg_type) {
 	case ISPIF_ENABLE_REG_DUMP:
-		ispif->enb_dump_reg = pcdata->reg_dump; 
+		ispif->enb_dump_reg = pcdata->reg_dump; /* save dump config */
 		break;
 	case ISPIF_INIT:
 		rc = msm_ispif_init(ispif, pcdata->csid_version);
@@ -1342,9 +1351,8 @@ static long msm_ispif_subdev_fops_ioctl(struct file *file, unsigned int cmd,
 static int ispif_open_node(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 {
 	struct ispif_device *ispif = v4l2_get_subdevdata(sd);
-
 	mutex_lock(&ispif->mutex);
-	
+	/* mem remap is done in init when the clock is on */
 	ispif->open_cnt++;
 	mutex_unlock(&ispif->mutex);
 	return 0;
@@ -1354,7 +1362,6 @@ static int ispif_close_node(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 {
 	int rc = 0;
 	struct ispif_device *ispif = v4l2_get_subdevdata(sd);
-
 	if (!ispif) {
 		pr_err("%s: invalid input\n", __func__);
 		return -EINVAL;
@@ -1405,10 +1412,17 @@ static int ispif_probe(struct platform_device *pdev)
 		rc = of_property_read_u32((&pdev->dev)->of_node,
 		"qcom,num-isps", &ispif->hw_num_isps);
 		if (rc)
-			
+			/* backward compatibility */
 			ispif->hw_num_isps = 1;
-		
+		/* not an error condition */
 		rc = 0;
+	}
+
+	rc = msm_ispif_get_clk_info(ispif, pdev,
+		ispif_ahb_clk_info, ispif_clk_info);
+	if (rc < 0) {
+		pr_err("%s: msm_isp_get_clk_info() failed", __func__);
+			return -EFAULT;
 	}
 
 	mutex_init(&ispif->mutex);

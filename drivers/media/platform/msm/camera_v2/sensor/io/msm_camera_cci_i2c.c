@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2014,2016 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -71,6 +71,12 @@ int32_t msm_camera_cci_i2c_read_seq(struct msm_camera_i2c_client *client,
 		|| num_byte == 0)
 		return rc;
 
+	if (num_byte > I2C_REG_DATA_MAX) {
+		pr_err("%s: Error num_byte:0x%x exceeds 8K max supported:0x%x\n",
+			__func__, num_byte, I2C_REG_DATA_MAX);
+		return rc;
+	}
+
 	buf = kzalloc(num_byte, GFP_KERNEL);
 	if (!buf) {
 		pr_err("%s:%d no memory\n", __func__, __LINE__);
@@ -136,7 +142,7 @@ int32_t msm_camera_cci_i2c_write_seq(struct msm_camera_i2c_client *client,
 	uint32_t addr, uint8_t *data, uint32_t num_byte)
 {
 	int32_t rc = -EFAULT;
-	uint8_t i = 0;
+	uint32_t i = 0;
 	struct msm_camera_cci_ctrl cci_ctrl;
 	struct msm_camera_i2c_reg_array *reg_conf_tbl = NULL;
 
@@ -243,6 +249,12 @@ int32_t msm_camera_cci_i2c_write_seq_table(
 	client_addr_type = client->addr_type;
 	client->addr_type = write_setting->addr_type;
 
+	if (reg_setting->reg_data_size > I2C_SEQ_REG_DATA_MAX) {
+		pr_err("%s: number of bytes %u exceeding the max supported %d\n",
+		__func__, reg_setting->reg_data_size, I2C_SEQ_REG_DATA_MAX);
+		return rc;
+	}
+
 	for (i = 0; i < write_setting->size; i++) {
 		rc = msm_camera_cci_i2c_write_seq(client, reg_setting->reg_addr,
 			reg_setting->reg_data, reg_setting->reg_data_size);
@@ -292,6 +304,41 @@ int32_t msm_camera_cci_i2c_write_table_w_microdelay(
 	rc = cci_ctrl.status;
 	return rc;
 }
+
+/* HTC_START */
+int32_t msm_camera_cci_i2c_write_table_w_microdelay_htc(
+       struct msm_camera_i2c_client *client,
+       struct msm_camera_i2c_reg_setting *write_setting)
+{
+	int32_t rc = -EFAULT;
+	int i;
+	struct msm_camera_i2c_seq_reg_array reg_setting;
+
+	if (!client || !write_setting)
+		return rc;
+
+	if (client->addr_type == MSM_CAMERA_I2C_WORD_ADDR && write_setting->data_type == MSM_CAMERA_I2C_DWORD_DATA) {
+		for (i=0; i<write_setting->size; i++) {
+			reg_setting.reg_addr = write_setting->reg_setting[i].reg_addr;
+			reg_setting.reg_data[0] = 0;
+			reg_setting.reg_data[1] = 0;
+			reg_setting.reg_data[2] = (uint8_t)((write_setting->reg_setting[i].reg_data & 0xFF00) >> 8);
+			reg_setting.reg_data[3] = (uint8_t)(write_setting->reg_setting[i].reg_data & 0x00FF);
+			reg_setting.reg_data_size = 4;
+			rc = msm_camera_cci_i2c_write_seq(client, reg_setting.reg_addr, reg_setting.reg_data, reg_setting.reg_data_size);
+			if (rc < 0) {
+				pr_err("i2c write sequence error:%d\n", rc);
+				return rc;
+			}
+		}
+		return rc;
+	} else {
+		rc = msm_camera_cci_i2c_write_table_w_microdelay(client, write_setting);
+	}
+
+	return rc;
+}
+/* HTC_END */
 
 static int32_t msm_camera_cci_i2c_compare(struct msm_camera_i2c_client *client,
 	uint32_t addr, uint16_t data,
