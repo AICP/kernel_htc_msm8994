@@ -40,11 +40,20 @@ enum msm_bus_perf_setting {
 	S_EXIT
 };
 
+#ifdef CONFIG_CAMERA_DRIVER_VER_M
 struct msm_camera_slave_info {
 	uint16_t sensor_slave_addr;
 	uint16_t sensor_id_reg_addr;
 	uint16_t sensor_id;
 };
+#else
+struct msm_camera_slave_info {
+	uint16_t sensor_slave_addr;
+	uint16_t sensor_id_reg_addr;
+	uint16_t sensor_id;
+	uint16_t sensor_id_mask;
+};
+#endif
 
 struct msm_cam_clk_info {
 	const char *clk_name;
@@ -146,9 +155,9 @@ struct msm_eeprom_memory_map_t {
 
 struct msm_eeprom_memory_block_t {
 	struct msm_eeprom_memory_map_t *map;
-	uint32_t num_map;	
+	uint32_t num_map;	/* number of map blocks */
 	uint8_t *mapdata;
-	uint32_t num_data;	
+	uint32_t num_data;	/* size of total mapdata */
 };
 
 struct msm_eeprom_cmm_t {

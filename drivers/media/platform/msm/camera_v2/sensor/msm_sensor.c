@@ -17,9 +17,52 @@
 #include "msm_camera_i2c_mux.h"
 #include <linux/regulator/rpm-smd-regulator.h>
 #include <linux/regulator/consumer.h>
+/*HTC_START*/
+#ifdef CONFIG_OIS_CALIBRATION
+#include "lc898123F40_htc.h"
+#endif
+/*HTC_END*/
 
 #undef CDBG
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
+
+/*HTC_START*/
+#ifdef CONFIG_OIS_CALIBRATION
+
+#define OIS_COMPONENT_I2C_ADDR_WRITE 0x7C
+
+int htc_ois_calibration(struct msm_sensor_ctrl_t *s_ctrl, int cam_id)
+{
+	int rc = -1;
+	uint16_t cci_client_sid_backup;
+    pr_info("[OIS_Cali]%s:E \n", __func__);
+
+	/* Bcakup the I2C slave address */
+	cci_client_sid_backup = s_ctrl->sensor_i2c_client->cci_client->sid;
+
+	/* Replace the I2C slave address with OIS component */
+	s_ctrl->sensor_i2c_client->cci_client->sid = OIS_COMPONENT_I2C_ADDR_WRITE >> 1;
+
+    /*GYRO calibration*/
+    rc = htc_ext_GyroReCalib(s_ctrl, cam_id);
+    if (rc != 0)
+          pr_err("[OIS_Cali]htc_GyroReCalib fail.\n");
+    else{
+        /*rc = htc_ext_WrGyroOffsetData();
+        if (rc != 0)
+            pr_err("[OIS_Cali]htc_WrGyroOffsetData fail.\n");
+        else
+            pr_info("[OIS_Cali]Gyro calibration success.\n");*/
+        pr_info("[OIS_Cali]Skip OIS flash memory.\n");
+    }
+
+	/* Restore the I2C slave address */
+	s_ctrl->sensor_i2c_client->cci_client->sid = cci_client_sid_backup;
+
+	return rc;
+}
+#endif
+/*HTC_END*/
 
 static struct v4l2_file_operations msm_sensor_v4l2_subdev_fops;
 static void msm_sensor_adjust_mclk(struct msm_camera_power_ctrl_t *ctrl)
@@ -123,7 +166,10 @@ static int32_t msm_sensor_get_dt_data(struct device_node *of_node,
 	struct msm_camera_sensor_board_info *sensordata = NULL;
 	uint16_t *gpio_array = NULL;
 	uint16_t gpio_array_size = 0;
-	uint32_t id_info[3];
+	uint32_t id_info[MSM_SENSOR_NUM_ID_INFO_DATA];
+	uint32_t count;
+	const uint32_t *p;
+	struct msm_camera_slave_info *slave_info;
 
 	s_ctrl->sensordata = kzalloc(sizeof(
 		struct msm_camera_sensor_board_info),
@@ -149,7 +195,7 @@ static int32_t msm_sensor_get_dt_data(struct device_node *of_node,
 	CDBG("%s qcom,cci-master %d, rc %d\n", __func__, s_ctrl->cci_i2c_master,
 		rc);
 	if (rc < 0) {
-		
+		/* Set default master 0 */
 		s_ctrl->cci_i2c_master = MASTER_0;
 		rc = 0;
 	}
@@ -160,10 +206,10 @@ static int32_t msm_sensor_get_dt_data(struct device_node *of_node,
 		goto FREE_SENSORDATA;
 	}
 
-	
+	/* Get sensor mount angle */
 	if (0 > of_property_read_u32(of_node, "qcom,mount-angle",
 		&sensordata->sensor_info->sensor_mount_angle)) {
-		
+		/* Invalidate mount angle flag */
 		CDBG("%s:%d Default sensor mount angle\n",
 			__func__, __LINE__);
 		sensordata->sensor_info->is_mount_angle_valid = 0;
@@ -287,23 +333,42 @@ static int32_t msm_sensor_get_dt_data(struct device_node *of_node,
 		goto FREE_ACTUATOR_INFO;
 	}
 
+	slave_info = sensordata->slave_info;
+
+	p = of_get_property(of_node, "qcom,slave-id", &count);
+	if (!p || !count) {
+		pr_err("%s failed %d\n", __func__, __LINE__);
+		goto FREE_SLAVE_INFO;
+	}
+
+	count /= sizeof(uint32_t);
+
+	if (count > MSM_SENSOR_NUM_ID_INFO_DATA) {
+		pr_err("%s failed %d\n", __func__, __LINE__);
+		goto FREE_SLAVE_INFO;
+	}
+
+	memset(id_info, 0, sizeof(*id_info)*MSM_SENSOR_NUM_ID_INFO_DATA);
+
 	rc = of_property_read_u32_array(of_node, "qcom,slave-id",
-		id_info, 3);
+		id_info, count);
 	if (rc < 0) {
 		pr_err("%s failed %d\n", __func__, __LINE__);
 		goto FREE_SLAVE_INFO;
 	}
 
-	sensordata->slave_info->sensor_slave_addr = id_info[0];
-	sensordata->slave_info->sensor_id_reg_addr = id_info[1];
-	sensordata->slave_info->sensor_id = id_info[2];
-	CDBG("%s:%d slave addr 0x%x sensor reg 0x%x id 0x%x\n",
+	slave_info->sensor_slave_addr = id_info[MSM_SENSOR_SLAVEADDR_DATA];
+	slave_info->sensor_id_reg_addr = id_info[MSM_SENSOR_IDREGADDR_DATA];
+	slave_info->sensor_id = id_info[MSM_SENSOR_SENSOR_ID_DATA];
+	slave_info->sensor_id_mask = id_info[MSM_SENSOR_SENIDMASK_DATA];
+	CDBG("%s:%d slave addr 0x%x sensor reg 0x%x id 0x%x mask 0x%x\n",
 		__func__, __LINE__,
-		sensordata->slave_info->sensor_slave_addr,
-		sensordata->slave_info->sensor_id_reg_addr,
-		sensordata->slave_info->sensor_id);
+		slave_info->sensor_slave_addr,
+		slave_info->sensor_id_reg_addr,
+		slave_info->sensor_id,
+		slave_info->sensor_id_mask);
 
-	
+	/*Optional property, don't return error if absent */
 	ret = of_property_read_string(of_node, "qcom,vdd-cx-name",
 		&sensordata->misc_regulator);
 	CDBG("%s qcom,misc_regulator %s, rc %d\n", __func__,
@@ -485,6 +550,25 @@ int msm_sensor_power_up(struct msm_sensor_ctrl_t *s_ctrl)
 	return rc;
 }
 
+static uint16_t msm_sensor_id_by_mask(struct msm_sensor_ctrl_t *s_ctrl,
+	uint16_t chipid)
+{
+	uint16_t sensor_id = chipid;
+	int16_t sensor_id_mask = s_ctrl->sensordata->slave_info->sensor_id_mask;
+
+	if (!sensor_id_mask)
+		sensor_id_mask = ~sensor_id_mask;
+
+	sensor_id &= sensor_id_mask;
+	sensor_id_mask &= -sensor_id_mask;
+	sensor_id_mask -= 1;
+	while (sensor_id_mask) {
+		sensor_id_mask >>= 1;
+		sensor_id >>= 1;
+	}
+	return sensor_id;
+}
+
 int msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl)
 {
 	int rc = 0;
@@ -519,7 +603,7 @@ int msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl)
 
 	CDBG("%s: read id: 0x%x expected id 0x%x:\n", __func__, chipid,
 		slave_info->sensor_id);
-	if (chipid != slave_info->sensor_id) {
+	if (msm_sensor_id_by_mask(s_ctrl, chipid) != slave_info->sensor_id) {
 		pr_err("msm_sensor_match_id chip id doesnot match\n");
 		return -ENODEV;
 	}
@@ -535,12 +619,14 @@ static struct msm_sensor_ctrl_t *get_sctrl(struct v4l2_subdev *sd)
 static void msm_sensor_stop_stream(struct msm_sensor_ctrl_t *s_ctrl)
 {
 	int32_t rc = 0;
+
 	mutex_lock(s_ctrl->msm_sensor_mutex);
 	if (s_ctrl->sensor_state == MSM_SENSOR_POWER_UP) {
 		s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write_table(
 			s_ctrl->sensor_i2c_client, &s_ctrl->stop_setting);
 		kfree(s_ctrl->stop_setting.reg_setting);
 		s_ctrl->stop_setting.reg_setting = NULL;
+
 		if (s_ctrl->func_tbl->sensor_power_down) {
 			if (s_ctrl->sensordata->misc_regulator)
 				msm_sensor_misc_regulator(s_ctrl, 0);
@@ -564,6 +650,9 @@ static void msm_sensor_stop_stream(struct msm_sensor_ctrl_t *s_ctrl)
 static int msm_sensor_get_af_status(struct msm_sensor_ctrl_t *s_ctrl,
 			void __user *argp)
 {
+	/* TO-DO: Need to set AF status register address and expected value
+	We need to check the AF status in the sensor register and
+	set the status in the *status variable accordingly*/
 	return 0;
 }
 
@@ -581,7 +670,7 @@ static long msm_sensor_subdev_ioctl(struct v4l2_subdev *sd,
 	case VIDIOC_MSM_SENSOR_CFG:
 #ifdef CONFIG_COMPAT
 		if (is_compat_task())
-		
+		//HTC_CAM_START
 		#if 0
 				rc = s_ctrl->func_tbl->sensor_config32(s_ctrl, argp);
 		#else
@@ -590,7 +679,7 @@ static long msm_sensor_subdev_ioctl(struct v4l2_subdev *sd,
 				rc = s_ctrl->func_tbl->sensor_config32(s_ctrl, argp);
         }
         #endif
-		
+		//HTC_CAM_END
 		else
 #endif
 			rc = s_ctrl->func_tbl->sensor_config(s_ctrl, argp);
@@ -626,6 +715,45 @@ long msm_sensor_subdev_fops_ioctl(struct file *file,
 	return video_usercopy(file, cmd, arg, msm_sensor_subdev_do_ioctl);
 }
 
+//HTC_CAM_START
+#ifdef CONFIG_COMPAT
+static int sensor_config_read_pdaf_data32(struct msm_sensor_ctrl_t *s_ctrl,
+	void __user *arg)
+{
+	int rc = -EINVAL;
+	struct msm_camera_power_ctrl_t *power_info;
+	struct msm_camera_i2c_client *sensor_i2c_client;
+	power_info = &s_ctrl->sensordata->power_info;
+	sensor_i2c_client = s_ctrl->sensor_i2c_client;
+
+	rc = msm_camera_power_up(power_info, s_ctrl->sensor_device_type, sensor_i2c_client);
+	if (rc < 0) {
+		pr_err("[CAM_PDAF]failed rc %d\n", rc);
+		goto power_down;
+	}
+
+	if (s_ctrl->func_tbl->sensor_i2c_read_pdaf_data32 == NULL) {
+		rc = -EFAULT;
+		return rc;
+	}
+	rc = s_ctrl->func_tbl->sensor_i2c_read_pdaf_data32(arg, s_ctrl);
+	if (rc < 0) {
+		pr_err("[CAM_PDAF]Read pdaf data failed\n");
+		goto power_down;
+	}
+
+	/*e_ctrl->is_supported |= msm_eeprom_match_crc(&e_ctrl->cal_data);
+	CDBG("e_ctrl is supported %d\n", e_ctrl->is_supported);*/
+	rc = msm_camera_power_down(power_info, s_ctrl->sensor_device_type, sensor_i2c_client);
+	if (rc < 0)
+		pr_err("[CAM_PDAF]failed rc %d\n", rc);
+	return rc;
+power_down:
+	msm_camera_power_down(power_info, s_ctrl->sensor_device_type, sensor_i2c_client);
+	return rc;
+}
+#endif
+
 #if 0
 static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 	void __user *argp)
@@ -633,6 +761,7 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 	void __user *argp)
 #endif
+//HTC_CAM_END
 {
 	struct sensorb_cfg_data32 *cdata = (struct sensorb_cfg_data32 *)argp;
 	int32_t rc = 0;
@@ -715,7 +844,8 @@ int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 		conf_array.size = conf_array32.size;
 		conf_array.reg_setting = compat_ptr(conf_array32.reg_setting);
 
-		if (!conf_array.size) {
+		if (!conf_array.size ||
+			conf_array.size > I2C_REG_DATA_MAX) {
 			pr_err("%s:%d failed\n", __func__, __LINE__);
 			rc = -EFAULT;
 			break;
@@ -748,10 +878,15 @@ int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 	}
 	case CFG_SLAVE_READ_I2C: {
 		struct msm_camera_i2c_read_config read_config;
+		struct msm_camera_i2c_read_config *read_config_ptr = NULL;
 		uint16_t local_data = 0;
 		uint16_t orig_slave_addr = 0, read_slave_addr = 0;
-		if (copy_from_user(&read_config,
-			(void *)compat_ptr(cdata->cfg.setting),
+
+		read_config_ptr =
+			(struct msm_camera_i2c_read_config *)
+			compat_ptr(cdata->cfg.setting);
+
+		if (copy_from_user(&read_config, read_config_ptr,
 			sizeof(struct msm_camera_i2c_read_config))) {
 			pr_err("%s:%d failed\n", __func__, __LINE__);
 			rc = -EFAULT;
@@ -788,12 +923,7 @@ int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 			pr_err("%s:%d: i2c_read failed\n", __func__, __LINE__);
 			break;
 		}
-		if (copy_to_user(&read_config.data,
-			(void *)&local_data, sizeof(uint16_t))) {
-			pr_err("%s:%d copy failed\n", __func__, __LINE__);
-			rc = -EFAULT;
-			break;
-		}
+		read_config_ptr->data = local_data;
 		break;
 	}
 	case CFG_WRITE_I2C_SEQ_ARRAY: {
@@ -821,11 +951,13 @@ int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 		conf_array.size = conf_array32.size;
 		conf_array.reg_setting = compat_ptr(conf_array32.reg_setting);
 
-		if (!conf_array.size) {
+		if (!conf_array.size ||
+			conf_array.size > I2C_SEQ_REG_DATA_MAX) {
 			pr_err("%s:%d failed\n", __func__, __LINE__);
 			rc = -EFAULT;
 			break;
 		}
+
 		reg_setting = kzalloc(conf_array.size *
 			(sizeof(struct msm_camera_i2c_seq_reg_array)),
 			GFP_KERNEL);
@@ -946,6 +1078,7 @@ int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 		}
 		break;
 	}
+/* HTC_START, HTC_VCM, Harvey 20130628 - Porting read OTP*/
 	case CFG_I2C_IOCTL_R_OTP:
 		if (s_ctrl->func_tbl->sensor_i2c_read_fuseid32 == NULL) {
 			rc = -EFAULT;
@@ -953,6 +1086,8 @@ int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 		}
 		rc = s_ctrl->func_tbl->sensor_i2c_read_fuseid32(cdata, s_ctrl);
 	break;
+/* HTC_END, HTC_VCM*/
+/* HTC_START, read camera emmc*/
 	case CFG_I2C_IOCTL_R_EMMC:
 		if (s_ctrl->func_tbl->sensor_i2c_read_emmc32 == NULL) {
 			rc = -EFAULT;
@@ -960,6 +1095,28 @@ int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 		}
 		rc = s_ctrl->func_tbl->sensor_i2c_read_emmc32(cdata);
 	break;
+/* HTC_END*/
+/*HTC_START GYRO calibration*/
+    case CFG_SET_GYRO_CALIBRATION:
+#ifdef CONFIG_OIS_CALIBRATION
+        rc = htc_ois_calibration(s_ctrl, s_ctrl->sensordata->sensor_info->position);
+#else
+        rc = 0;
+#endif
+    break;
+/*HTC_END*/
+/*HTC_START Get PDAF data*/
+    case CFG_GET_PDAF_SIZE:
+		if (s_ctrl->func_tbl->sensor_i2c_get_pdaf_size32 == NULL) {
+			rc = -EFAULT;
+			break;
+		}
+		rc = s_ctrl->func_tbl->sensor_i2c_get_pdaf_size32(cdata, s_ctrl);
+    break;
+    case CFG_READ_PDAF_DATA:
+		rc = sensor_config_read_pdaf_data32(s_ctrl, cdata);
+    break;
+/*HTC_END*/
 
 	default:
 		rc = -EFAULT;
@@ -1048,7 +1205,8 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 			break;
 		}
 
-		if (!conf_array.size) {
+		if (!conf_array.size ||
+			conf_array.size > I2C_REG_DATA_MAX) {
 			pr_err("%s:%d failed\n", __func__, __LINE__);
 			rc = -EFAULT;
 			break;
@@ -1078,10 +1236,13 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 	}
 	case CFG_SLAVE_READ_I2C: {
 		struct msm_camera_i2c_read_config read_config;
+		struct msm_camera_i2c_read_config *read_config_ptr = NULL;
 		uint16_t local_data = 0;
 		uint16_t orig_slave_addr = 0, read_slave_addr = 0;
-		if (copy_from_user(&read_config,
-			(void *)cdata->cfg.setting,
+
+		read_config_ptr =
+			(struct msm_camera_i2c_read_config *)cdata->cfg.setting;
+		if (copy_from_user(&read_config, read_config_ptr,
 			sizeof(struct msm_camera_i2c_read_config))) {
 			pr_err("%s:%d failed\n", __func__, __LINE__);
 			rc = -EFAULT;
@@ -1118,12 +1279,7 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 			pr_err("%s:%d: i2c_read failed\n", __func__, __LINE__);
 			break;
 		}
-		if (copy_to_user(&read_config.data,
-			(void *)&local_data, sizeof(uint16_t))) {
-			pr_err("%s:%d copy failed\n", __func__, __LINE__);
-			rc = -EFAULT;
-			break;
-		}
+		read_config_ptr->data = local_data;
 		break;
 	}
 	case CFG_SLAVE_WRITE_I2C_ARRAY: {
@@ -1144,11 +1300,13 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 			write_config.slave_addr,
 			write_config.conf_array.size);
 
-		if (!write_config.conf_array.size) {
+		if (!write_config.conf_array.size ||
+			write_config.conf_array.size > I2C_SEQ_REG_DATA_MAX) {
 			pr_err("%s:%d failed\n", __func__, __LINE__);
 			rc = -EFAULT;
 			break;
 		}
+
 		reg_setting = kzalloc(write_config.conf_array.size *
 			(sizeof(struct msm_camera_i2c_reg_array)), GFP_KERNEL);
 		if (!reg_setting) {
@@ -1222,11 +1380,13 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 			break;
 		}
 
-		if (!conf_array.size) {
+		if (!conf_array.size ||
+			conf_array.size > I2C_SEQ_REG_DATA_MAX) {
 			pr_err("%s:%d failed\n", __func__, __LINE__);
 			rc = -EFAULT;
 			break;
 		}
+
 		reg_setting = kzalloc(conf_array.size *
 			(sizeof(struct msm_camera_i2c_seq_reg_array)),
 			GFP_KERNEL);
@@ -1343,6 +1503,7 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 		}
 		break;
 	}
+/* HTC_START, HTC_VCM, Harvey 20130628 - Porting read OTP*/
 	case CFG_I2C_IOCTL_R_OTP:
 		if (s_ctrl->func_tbl->sensor_i2c_read_fuseid == NULL) {
 			rc = -EFAULT;
@@ -1350,6 +1511,8 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 		}
 		rc = s_ctrl->func_tbl->sensor_i2c_read_fuseid(cdata, s_ctrl);
 	break;
+/* HTC_END, HTC_VCM*/
+/* HTC_START, read camera emmc*/
 	case CFG_I2C_IOCTL_R_EMMC:
 		if (s_ctrl->func_tbl->sensor_i2c_read_emmc == NULL) {
 			rc = -EFAULT;
@@ -1357,6 +1520,24 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 		}
 		rc = s_ctrl->func_tbl->sensor_i2c_read_emmc(cdata);
 	break;
+/* HTC_END*/
+/*HTC_START GYRO calibration*/
+    case CFG_SET_GYRO_CALIBRATION:
+#ifdef CONFIG_OIS_CALIBRATION
+        rc = htc_ois_calibration(s_ctrl, s_ctrl->sensordata->sensor_info->position);
+#else
+        rc = 0;
+#endif
+    break;
+/*HTC_END*/
+/*HTC_START Get PDAF data*/
+    case CFG_GET_PDAF_SIZE:
+        rc = 0;
+    break;
+    case CFG_READ_PDAF_DATA:
+        rc = 0;
+    break;
+/*HTC_END*/
 	default:
 		rc = -EFAULT;
 		break;
@@ -1434,6 +1615,9 @@ static struct msm_camera_i2c_fn_t msm_sensor_cci_func_tbl = {
 	.i2c_read_seq = msm_camera_cci_i2c_read_seq,
 	.i2c_write = msm_camera_cci_i2c_write,
 	.i2c_write_table = msm_camera_cci_i2c_write_table,
+/* HTC_START */
+	.i2c_write_seq = msm_camera_cci_i2c_write_seq,
+/* HTC_END */
 	.i2c_write_seq_table = msm_camera_cci_i2c_write_seq_table,
 	.i2c_write_table_w_microdelay =
 		msm_camera_cci_i2c_write_table_w_microdelay,
@@ -1446,6 +1630,9 @@ static struct msm_camera_i2c_fn_t msm_sensor_qup_func_tbl = {
 	.i2c_read_seq = msm_camera_qup_i2c_read_seq,
 	.i2c_write = msm_camera_qup_i2c_write,
 	.i2c_write_table = msm_camera_qup_i2c_write_table,
+/* HTC_START */
+	.i2c_write_seq = msm_camera_qup_i2c_write_seq,
+/* HTC_END */
 	.i2c_write_seq_table = msm_camera_qup_i2c_write_seq_table,
 	.i2c_write_table_w_microdelay =
 		msm_camera_qup_i2c_write_table_w_microdelay,
@@ -1479,7 +1666,7 @@ int32_t msm_sensor_platform_probe(struct platform_device *pdev,
 		pr_err("%s failed line %d\n", __func__, __LINE__);
 		return rc;
 	}
-	
+	/* TODO: get CCI subdev */
 	cci_client = s_ctrl->sensor_i2c_client->cci_client;
 	cci_client->cci_subdev = msm_cci_get_subdev();
 	cci_client->cci_i2c_master = s_ctrl->cci_i2c_master;
@@ -1487,9 +1674,9 @@ int32_t msm_sensor_platform_probe(struct platform_device *pdev,
 		s_ctrl->sensordata->slave_info->sensor_slave_addr >> 1;
 	cci_client->retries = 3;
 	cci_client->id_map = 0;
-	
+	/*HTC_START*/
 	cci_client->i2c_freq_mode = I2C_FAST_MODE;
-	
+	/*HTC_END*/
 	if (!s_ctrl->func_tbl)
 		s_ctrl->func_tbl = &msm_sensor_func_tbl;
 	if (!s_ctrl->sensor_i2c_client->i2c_func_tbl)
@@ -1538,31 +1725,33 @@ int32_t msm_sensor_platform_probe(struct platform_device *pdev,
 	s_ctrl->msm_sd.sd.entity.flags = mount_pos | MEDIA_ENT_FL_DEFAULT;
 
 	rc = camera_init_v4l2(&s_ctrl->pdev->dev, &session_id);
-	
+	//HTC_SATRT, add error handle
 	if (rc < 0) {
 		pr_err("%s: camera_init_v4l2 failed rc = %d\n", __func__, rc);
+		s_ctrl->func_tbl->sensor_power_down(s_ctrl);
 		kfree(s_ctrl->sensordata->power_info.clk_info);
 		kfree(cci_client);
 		return rc;
 	}
-	
+	//HTC_END
 
 	CDBG("%s rc %d session_id %d\n", __func__, rc, session_id);
 	s_ctrl->sensordata->sensor_info->session_id = session_id;
 	s_ctrl->msm_sd.close_seq = MSM_SD_CLOSE_2ND_CATEGORY | 0x3;
-	
+	//HTC_SATRT, add error handle
 	#if 0
 	msm_sd_register(&s_ctrl->msm_sd);
 	#else
 	rc = msm_sd_register(&s_ctrl->msm_sd);
 	if (rc < 0) {
 		pr_err("%s: msm_sd_register failed rc = %d\n", __func__, rc);
+		s_ctrl->func_tbl->sensor_power_down(s_ctrl);
 		kfree(s_ctrl->sensordata->power_info.clk_info);
 		kfree(cci_client);
 		return rc;
 	}
 	#endif
-	
+	//HTC_END
 
 	msm_sensor_v4l2_subdev_fops = v4l2_subdev_fops;
 #ifdef CONFIG_COMPAT
@@ -1706,7 +1895,7 @@ int32_t msm_sensor_init_default_params(struct msm_sensor_ctrl_t *s_ctrl)
 	struct msm_cam_clk_info      *clk_info = NULL;
 	unsigned long mount_pos = 0;
 
-	
+	/* Validate input parameters */
 	if (!s_ctrl) {
 		pr_err("%s:%d failed: invalid params s_ctrl %p\n", __func__,
 			__LINE__, s_ctrl);
@@ -1719,7 +1908,7 @@ int32_t msm_sensor_init_default_params(struct msm_sensor_ctrl_t *s_ctrl)
 		return -EINVAL;
 	}
 
-	
+	/* Initialize cci_client */
 	s_ctrl->sensor_i2c_client->cci_client = kzalloc(sizeof(
 		struct msm_camera_cci_client), GFP_KERNEL);
 	if (!s_ctrl->sensor_i2c_client->cci_client) {
@@ -1731,10 +1920,10 @@ int32_t msm_sensor_init_default_params(struct msm_sensor_ctrl_t *s_ctrl)
 	if (s_ctrl->sensor_device_type == MSM_CAMERA_PLATFORM_DEVICE) {
 		cci_client = s_ctrl->sensor_i2c_client->cci_client;
 
-		
+		/* Get CCI subdev */
 		cci_client->cci_subdev = msm_cci_get_subdev();
 
-		
+		/* Update CCI / I2C function table */
 		if (!s_ctrl->sensor_i2c_client->i2c_func_tbl)
 			s_ctrl->sensor_i2c_client->i2c_func_tbl =
 				&msm_sensor_cci_func_tbl;
@@ -1746,15 +1935,15 @@ int32_t msm_sensor_init_default_params(struct msm_sensor_ctrl_t *s_ctrl)
 		}
 	}
 
-	
+	/* Update function table driven by ioctl */
 	if (!s_ctrl->func_tbl)
 		s_ctrl->func_tbl = &msm_sensor_func_tbl;
 
-	
+	/* Update v4l2 subdev ops table */
 	if (!s_ctrl->sensor_v4l2_subdev_ops)
 		s_ctrl->sensor_v4l2_subdev_ops = &msm_sensor_subdev_ops;
 
-	
+	/* Initialize clock info */
 	clk_info = kzalloc(sizeof(cam_8974_clk_info), GFP_KERNEL);
 	if (!clk_info) {
 		pr_err("%s:%d failed no memory clk_info %p\n", __func__,
@@ -1767,7 +1956,7 @@ int32_t msm_sensor_init_default_params(struct msm_sensor_ctrl_t *s_ctrl)
 	s_ctrl->sensordata->power_info.clk_info_size =
 		ARRAY_SIZE(cam_8974_clk_info);
 
-	
+	/* Update sensor mount angle and position in media entity flag */
 	mount_pos = s_ctrl->sensordata->sensor_info->position << 16;
 	mount_pos = mount_pos | ((s_ctrl->sensordata->sensor_info->
 					sensor_mount_angle / 90) << 8);
@@ -1780,6 +1969,7 @@ FREE_CCI_CLIENT:
 	return rc;
 }
 
+/*HTC_START*/
 #include <linux/fs.h>
 #include <linux/file.h>
 #include <linux/vmalloc.h>
@@ -1828,10 +2018,21 @@ struct file* msm_fopen(const char* path, int flags, int rights) {
 
 uint32_t msm_sensor_get_boardinfo(struct device_node *of_node)
 {
-    uint32_t boardinfo = 0;   
+    uint32_t boardinfo = 0;   //set as 1 after XC board
     if (0 > of_property_read_u32(of_node, "qcom,b3-image", &boardinfo))
     {
         boardinfo = 0;
     }
     return boardinfo;
 }
+
+uint32_t msm_sensor_get_pdaf_flag(struct device_node *of_node)
+{
+    uint32_t pdaf_flag = 0;
+    if (0 > of_property_read_u32(of_node, "qcom,pdaf-driverIC", &pdaf_flag))
+    {
+        pdaf_flag = 0;
+    }
+    return pdaf_flag;
+}
+/*HTC_END*/

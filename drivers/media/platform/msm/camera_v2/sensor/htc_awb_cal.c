@@ -1,3 +1,4 @@
+/* arch/arm/mach-msm/htc_awb_cal.c */
 /* Code to extract Camera AWB calibration information from ATAG
 set up by the bootloader.
 
@@ -20,6 +21,7 @@ GNU General Public License for more details.
 #include <linux/proc_fs.h>
 #include <asm/setup.h>
 
+/* for outputing file to filesystem : /data/awb_calibration_data_hboot.txt */
 #include <linux/fs.h>
 #include <linux/syscalls.h>
 #include <linux/vmalloc.h>
@@ -28,11 +30,15 @@ GNU General Public License for more details.
 #include <linux/slab.h>
 #include "msm_sensor.h"
 
+//#define CAM_AWB_CAL_DEBUG
 
+/* configuration tags specific to msm */
+//#define ATAG_MSM_AWB_CAL	0x59504550 /* MSM CAMERA AWB Calibration */
 
-#define AWB_CAL_MAX_SIZE	0x4000U     
+#define AWB_CAL_MAX_SIZE	0x4000U     /* 0x1000 = 4096 bytes  0x2000 = 8192 bytes  0x3000 = 12288 bytes 0x4000 = 16384 bytes */
 #define DUAL_CAL_SIZE 4095
 
+/* HTC_START, use dt for calibration data */
 #define CALIBRATION_DATA_PATH "/calibration_data"
 #define CAM_AWB_CAL_DATA "cam_awb"
 
@@ -44,32 +50,40 @@ struct qct_lsc_struct{
 };
 
 struct qct_awb_lsc_struct{
-	unsigned long int caBuff[8];
-	struct qct_lsc_struct qct_lsc_data;
-	
-	unsigned long int flashcaBuff[8];  
-	
-	unsigned long int aec_caBuff[9]; 
-	unsigned long int alight_caBuff[8]; 
-	unsigned long int dualflashcaBuff[12];  
+	unsigned long int caBuff[8];/* AWB Calibartion */
+	struct qct_lsc_struct qct_lsc_data;/* LSC Calibration */
+	/* Andrew_Cheng 20120223 For Flash_Camera MB */
+	unsigned long int flashcaBuff[8];  //flash_camera
+	/* Andrew_Cheng 20120223 For Flash_Camera ME */
+	unsigned long int aec_caBuff[9]; // AEC calibration data
+	unsigned long int alight_caBuff[8]; // A-light AWB calibration data
+	unsigned long int dualflashcaBuff[12];  //dual flash calibration
+// HTC_START, For new AWB check
 	unsigned long int awb_verify;
+// HTC_END, For new AWB check
 };
 
 static unsigned char cam_awb_ram[AWB_CAL_MAX_SIZE];
 
+//HTC_START, for in-house 3D cal
 #define InHouse3D_CAL
 #ifdef InHouse3D_CAL
 #define GEOMETRY_SIZE 1843200
 #define STEREO_SIZE 160
 #define InHouse3D_Size (GEOMETRY_SIZE+STEREO_SIZE)
 
-#define InHouse3D_Size_C 131072   
+#define InHouse3D_Size_C 131072   //128KB
 
 typedef struct _U16_S { uint16_t v; } __packed U16_S;
 typedef struct _U32_S { uint32_t v; } __packed U32_S;
 #define A32(x) (((U32_S *)(x))->v)
 #define A16(x) (((U16_S *)(x))->v)
+//static unsigned char camera_3D[InHouse3D_Size+1];
+//static unsigned char camera_3D_2[InHouse3D_Size+1];
 
+//**************************************
+// Constants
+//**************************************
 #define MINMATCH 4
 
 #define DICTIONARY_LOGSIZE 16
@@ -102,9 +116,13 @@ typedef struct _U32_S { uint32_t v; } __packed U32_S;
 #define UARCH uint32_t
 #define AARCH A32
 
+//Little Endian
 #define LZ4_READ_LITTLEENDIAN_16(d,s,p) { d = (s) - A16(p); }
 #define LZ4_WRITE_LITTLEENDIAN_16(p,v)  { A16(p) = v; p+=2; }
 
+//************************************************************
+// Local Types
+//************************************************************
 struct LZ4HC_Data_Structure
 {
     const unsigned char* inputBuffer;
@@ -115,6 +133,9 @@ struct LZ4HC_Data_Structure
     const unsigned char* nextToUpdate;
 };
 
+//**************************************
+// Macros
+//**************************************
 #define LZ4_WILDCOPY(s,d,e)    do { LZ4_COPYPACKET(s,d) } while (d<e);
 #define LZ4_BLINDCOPY(s,d,l)   { unsigned char* e=d+l; LZ4_WILDCOPY(s,d,e); d=e; }
 #define HASH_FUNCTION(i)       (((i) * 2654435761U) >> ((MINMATCH*8)-HASH_LOG))
@@ -124,14 +145,19 @@ struct LZ4HC_Data_Structure
 #define GETNEXT(p)             ((p) - (size_t)DELTANEXT(p))
 
 #endif
+//HTC_END
 
 int gCAM_AWB_CAL_LEN;
 
+/* HTC_START */
+/* klocwork */
 unsigned char *dummy(unsigned char *p)
 {
     return p;
 }
+/* HTC_END */
 
+/* HTC_START, use dt for calibration data */
 unsigned char *get_cam_awb_cal( void )
 {
      struct device_node *offset = of_find_node_by_path(CALIBRATION_DATA_PATH);
@@ -144,7 +170,7 @@ unsigned char *get_cam_awb_cal( void )
      p_size = 0;
      p_data = NULL;
      if (offset) {
-          
+          /* of_get_property will return address of property, and fill the length to *p_size */
           p_data = (unsigned char*) of_get_property(offset, CAM_AWB_CAL_DATA, &p_size);
 #ifdef CAM_AWB_CAL_DEBUG
           if (p_data) {
@@ -162,8 +188,10 @@ unsigned char *get_cam_awb_cal( void )
 	return( cam_awb_ram );
 }
 EXPORT_SYMBOL(get_cam_awb_cal);
+/* HTC_END */
 
 
+//HTC_START, for in-house 3D cal
 #ifdef InHouse3D_CAL
 
 int LZ4_NbCommonBytes (register uint32_t val)
@@ -182,6 +210,7 @@ void LZ4_initHC (struct LZ4HC_Data_Structure* hc4, const unsigned char* base)
     hc4->end = base;
 }
 
+// Update chains up to ip (excluded)
 void LZ4HC_Insert (struct LZ4HC_Data_Structure* hc4, const unsigned char* ip)
 {
     uint16_t* chainTable = hc4->chainTable;
@@ -223,17 +252,17 @@ int LZ4HC_InsertAndFindBestMatch (struct LZ4HC_Data_Structure* hc4, const unsign
     const unsigned char* base = hc4->base;
     int nbAttempts=MAX_NB_ATTEMPTS;
     size_t repl=0, ml=0;
-    uint16_t delta=0;  
-    
+    uint16_t delta=0;  // useless assignment, to remove an uninitialization warning
+    // HC4 match finder
     LZ4HC_Insert(hc4, ip);
     ref = HASH_POINTER(ip);
 
 #define REPEAT_OPTIMIZATION
 #ifdef REPEAT_OPTIMIZATION
-    
-    if ((uint32_t)(ip-ref) <= 4)        
+    // Detect repetitive sequences of length <= 4
+    if ((uint32_t)(ip-ref) <= 4)        // potential repetition
     {
-        if (A32(ref) == A32(ip))   
+        if (A32(ref) == A32(ip))   // confirmed
         {
             delta = (uint16_t)(ip-ref);
             repl = ml  = LZ4HC_CommonLength(ip+MINMATCH, ref+MINMATCH, matchlimit) + MINMATCH;
@@ -256,7 +285,7 @@ int LZ4HC_InsertAndFindBestMatch (struct LZ4HC_Data_Structure* hc4, const unsign
     }
 
 #ifdef REPEAT_OPTIMIZATION
-    
+    // Complete table
     if (repl)
     {
         const unsigned char* ptr = ip;
@@ -265,13 +294,13 @@ int LZ4HC_InsertAndFindBestMatch (struct LZ4HC_Data_Structure* hc4, const unsign
         end = ip + repl - (MINMATCH-1);
         while(ptr < end-delta)
         {
-            DELTANEXT(ptr) = delta;    
+            DELTANEXT(ptr) = delta;    // Pre-Load
             ptr++;
         }
         do
         {
             DELTANEXT(ptr) = delta;
-            HashTable[HASH_VALUE(ptr)] = (uint32_t)((ptr) - base);     
+            HashTable[HASH_VALUE(ptr)] = (uint32_t)((ptr) - base);     // Head of chain
             ptr++;
         } while(ptr < end);
         hc4->nextToUpdate = end;
@@ -289,7 +318,7 @@ int LZ4HC_InsertAndGetWiderMatch (struct LZ4HC_Data_Structure* hc4, const unsign
     int nbAttempts = MAX_NB_ATTEMPTS;
     int delta = (int)(ip-startLimit);
 
-    
+    // First Match
     LZ4HC_Insert(hc4, ip);
     ref = HASH_POINTER(ip);
 
@@ -317,7 +346,7 @@ int LZ4HC_InsertAndGetWiderMatch (struct LZ4HC_Data_Structure* hc4, const unsign
 _endCount:
             reft = ref;
 #else
-            
+            // Easier for code maintenance, but unfortunately slower too
             const unsigned char* startt = ip;
             const unsigned char* reft = ref;
             const unsigned char* ipt = ip + MINMATCH + LZ4HC_CommonLength(ip+MINMATCH, ref+MINMATCH, matchlimit);
@@ -353,26 +382,26 @@ int LZ4HC_encodeSequence (
     int length;
     unsigned char* token;
 
-    
+    // Encode Literal length
     length = (int)(*ip - *anchor);
     token = (*op)++;
-    if ((limitedOutputBuffer) && ((*op + length + (2 + 1 + LASTLITERALS) + (length>>8)) > oend)) return 1;   
+    if ((limitedOutputBuffer) && ((*op + length + (2 + 1 + LASTLITERALS) + (length>>8)) > oend)) return 1;   // Check output limit
     if (length>=(int)RUN_MASK) { int len; *token=(RUN_MASK<<ML_BITS); len = length-RUN_MASK; for(; len > 254 ; len-=255) *(*op)++ = 255;  *(*op)++ = (unsigned char)len; }
     else *token = (unsigned char)(length<<ML_BITS);
 
-    
+    // Copy Literals
     LZ4_BLINDCOPY(*anchor, *op, length);
 
-    
+    // Encode Offset
     LZ4_WRITE_LITTLEENDIAN_16(*op,(uint16_t)(*ip-ref));
 
-    
+    // Encode MatchLength
     length = (int)(matchLength-MINMATCH);
-    if ((limitedOutputBuffer) && (*op + (1 + LASTLITERALS) + (length>>8) > oend)) return 1;   
+    if ((limitedOutputBuffer) && (*op + (1 + LASTLITERALS) + (length>>8) > oend)) return 1;   // Check output limit
     if (length>=(int)ML_MASK) { *token+=ML_MASK; length-=ML_MASK; for(; length > 509 ; length-=510) { *(*op)++ = 255; *(*op)++ = 255; } if (length > 254) { length-=255; *(*op)++ = 255; } *(*op)++ = (unsigned char)length; }
     else *token += (unsigned char)(length);
 
-    
+    // Prepare next loop
     *ip += matchLength;
     *anchor = *ip;
 
@@ -408,19 +437,19 @@ static int LZ4HC_compress_generic (
     const unsigned char* ref0;
 
 
-    
+    // Ensure blocks follow each other
     if (ip != ctx->end) return 0;
     ctx->end += inputSize;
 
     ip++;
 
-    
+    // Main Loop
     while (ip < mflimit)
     {
         ml = LZ4HC_InsertAndFindBestMatch (ctx, ip, matchlimit, (&ref));
         if (!ml) { ip++; continue; }
 
-        
+        // saved, in case we would skip too much
         start0 = ip;
         ref0 = ref;
         ml0 = ml;
@@ -430,7 +459,7 @@ _Search2:
             ml2 = LZ4HC_InsertAndGetWiderMatch(ctx, ip + ml - 2, ip + 1, matchlimit, ml, &ref2, &start2);
         else ml2 = ml;
 
-        if (ml2 == ml)  
+        if (ml2 == ml)  // No better match
         {
             if (LZ4HC_encodeSequence(&ip, &op, &anchor, ml, ref, limit, oend)) return 0;
             continue;
@@ -438,7 +467,7 @@ _Search2:
 
         if (start0 < ip)
         {
-            if (start2 < ip + ml0)   
+            if (start2 < ip + ml0)   // empirical
             {
                 ip = start0;
                 ref = ref0;
@@ -446,8 +475,8 @@ _Search2:
             }
         }
 
-        
-        if ((start2 - ip) < 3)   
+        // Here, start0==ip
+        if ((start2 - ip) < 3)   // First Match too small : removed
         {
             ml = ml2;
             ip = start2;
@@ -456,9 +485,9 @@ _Search2:
         }
 
 _Search3:
-        
-        
-        
+        // Currently we have :
+        // ml2 > ml1, and
+        // ip1+3 <= ip2 (usually < ip1+ml1)
         if ((start2 - ip) < OPTIMAL_ML)
         {
             int correction;
@@ -473,25 +502,25 @@ _Search3:
                 ml2 -= correction;
             }
         }
-        
+        // Now, we have start2 = ip+new_ml, with new_ml = min(ml, OPTIMAL_ML=18)
         if (start2 + ml2 < mflimit)
             ml3 = LZ4HC_InsertAndGetWiderMatch(ctx, start2 + ml2 - 3, start2, matchlimit, ml2, &ref3, &start3);
         else ml3 = ml2;
 
-        if (ml3 == ml2) 
+        if (ml3 == ml2) // No better match : 2 sequences to encode
         {
-            
+            // ip & ref are known; Now for ml
             if (start2 < ip+ml)  ml = (int)(start2 - ip);
-            
+            // Now, encode 2 sequences
             if (LZ4HC_encodeSequence(&ip, &op, &anchor, ml, ref, limit, oend)) return 0;
             ip = start2;
             if (LZ4HC_encodeSequence(&ip, &op, &anchor, ml2, ref2, limit, oend)) return 0;
             continue;
         }
 
-        if (start3 < ip+ml+3) 
+        if (start3 < ip+ml+3) // Not enough space for match 2 : remove it
         {
-            if (start3 >= (ip+ml)) 
+            if (start3 >= (ip+ml)) // can write Seq1 immediately ==> Seq2 is removed, so Seq3 becomes Seq1
             {
                 if (start2 < ip+ml)
                 {
@@ -524,8 +553,8 @@ _Search3:
             goto _Search3;
         }
 
-        
-        
+        // OK, now we have 3 ascending matches; let's write at least the first one
+        // ip & ref are known; Now for ml
         if (start2 < ip+ml)
         {
             if ((start2 - ip) < (int)ML_MASK)
@@ -560,17 +589,17 @@ _Search3:
 
     }
 
-    
+    // Encode Last Literals
     {
         int lastRun = (int)(iend - anchor);
-        if ((limit) && (((char*)op - dest) + lastRun + 1 + ((lastRun+255-RUN_MASK)/255) > (uint32_t)maxOutputSize)) return 0;  
+        if ((limit) && (((char*)op - dest) + lastRun + 1 + ((lastRun+255-RUN_MASK)/255) > (uint32_t)maxOutputSize)) return 0;  // Check output limit
         if (lastRun>=(int)RUN_MASK) { *op++=(RUN_MASK<<ML_BITS); lastRun-=RUN_MASK; for(; lastRun > 254 ; lastRun-=255) *op++ = 255; *op++ = (unsigned char) lastRun; }
         else *op++ = (unsigned char)(lastRun<<ML_BITS);
         memcpy(op, anchor, iend - anchor);
         op += iend-anchor;
     }
 
-    
+    // End
     return (int) (((char*)op)-dest);
 }
 
@@ -580,8 +609,8 @@ int LZ4_compressHC(const char* source, char* dest, int inputSize)
 	int result = 0;
 
 	ctx = vmalloc(sizeof(struct LZ4HC_Data_Structure));
-	LZ4_initHC((struct LZ4HC_Data_Structure *)ctx, source);
 	if (ctx == NULL) return 0;
+	LZ4_initHC((struct LZ4HC_Data_Structure *)ctx, source);
 
 	result = LZ4HC_compress_generic (ctx, source, dest, inputSize, 0, noLimit);
 
@@ -589,6 +618,7 @@ int LZ4_compressHC(const char* source, char* dest, int inputSize)
 	return result;
 }
 #endif
+//HTC_END
 
 static ssize_t awb_calibration_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
@@ -597,9 +627,9 @@ static ssize_t awb_calibration_show(struct device *dev,
 	unsigned char *ptr;
 
 	ptr = get_cam_awb_cal();
-	
+	/* fixed : workaround because of defined 8 parameters now */
 
-	ret = sizeof(struct qct_awb_lsc_struct);
+	ret = sizeof(struct qct_awb_lsc_struct);/* 8*4; */
 	printk(KERN_INFO "[CAM]awb_calibration_show(%d)\n", ret);
 	memcpy(buf, ptr, ret);
 
@@ -624,9 +654,9 @@ static ssize_t awb_calibration_front_show(struct device *dev,
 	unsigned char *ptr;
 
 	ptr = get_cam_awb_cal();
-	
+	/* fixed : workaround because of defined 8 parameters now */
 
-	ret = sizeof(struct qct_awb_lsc_struct);
+	ret = sizeof(struct qct_awb_lsc_struct);/* 8*4; */
 	printk(KERN_INFO "[CAM]awb_calibration_front_show(%d)\n", ret);
 	memcpy(buf, ptr + 0x1000U, ret);
 
@@ -652,9 +682,9 @@ static ssize_t awb_calibration_sub_show(struct device *dev,
 	unsigned char *ptr;
 
 	ptr = get_cam_awb_cal();
-	
+	/* fixed : workaround because of defined 8 parameters now */
 
-	ret = sizeof(struct qct_awb_lsc_struct);
+	ret = sizeof(struct qct_awb_lsc_struct);/* 8*4; */
 	printk(KERN_INFO "[CAM]awb_calibration_sub_show(%d)\n", ret);
 	memcpy(buf, ptr + 0x2000U, ret);
 
@@ -681,7 +711,7 @@ static ssize_t awb_calibration_3D_show(struct device *dev,
 	unsigned char *ptr;
 
 	ptr = get_cam_awb_cal();
-	
+	/* fixed : workaround because of defined 8 parameters now */
 
 	printk(KERN_INFO "[CAM]awb_calibration_3D_show(%d)\n", ret);
 	memcpy(buf, ptr + 0x3000U, ret);
@@ -701,6 +731,7 @@ static ssize_t awb_calibration_3D_show(struct device *dev,
 	return ret;
 }
 
+//HTC_START, for in-house 3D cal
 #ifdef InHouse3D_CAL
 static ssize_t awb_calibration_InHouse3D_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
@@ -748,9 +779,9 @@ unsigned char *get_cam_emmc_cal(int *length)
 				if(ret == InHouse3D_Size)
 				{
 						LZW_output = LZ4_compressHC((const char *)cam_buf_emmc,  (char *)cam_emmc_ram+5, GEOMETRY_SIZE);
-						memcpy(cam_emmc_ram, &m_bCompreess, sizeof(uint8_t));   
-						memcpy(cam_emmc_ram+1, &LZW_output, sizeof(uint32_t));   
-						memcpy(cam_emmc_ram+5+LZW_output, cam_buf_emmc+GEOMETRY_SIZE, STEREO_SIZE);   
+						memcpy(cam_emmc_ram, &m_bCompreess, sizeof(uint8_t));   //indicate non-compressed data
+						memcpy(cam_emmc_ram+1, &LZW_output, sizeof(uint32_t));   //geometry data size
+						memcpy(cam_emmc_ram+5+LZW_output, cam_buf_emmc+GEOMETRY_SIZE, STEREO_SIZE);   //geometry data size
 						*length = 5+LZW_output+STEREO_SIZE;
 						valid = 1;
 
@@ -793,14 +824,17 @@ unsigned char *get_cam_emmc_cal(int *length)
 EXPORT_SYMBOL(get_cam_emmc_cal);
 #endif
 
+//HTC_END
 
 static DEVICE_ATTR(awb_cal, 0444, awb_calibration_show, NULL);
 static DEVICE_ATTR(awb_cal_front, 0444, awb_calibration_front_show, NULL);
 static DEVICE_ATTR(awb_cal_sub, 0444, awb_calibration_sub_show, NULL);
 static DEVICE_ATTR(awb_cal_3D, 0444, awb_calibration_3D_show, NULL);
+//HTC_START, for in-house 3D cal
 #ifdef InHouse3D_CAL
 static DEVICE_ATTR(awb_cal_InHouse3D, 0444, awb_calibration_InHouse3D_show, NULL);
 #endif
+//HTC_END
 
 
 static struct kobject *cam_awb_cal;
@@ -809,7 +843,7 @@ static int cam_get_awb_cal(void)
 {
 	int ret ;
 
-	
+	/* Create /sys/android_camera_awb_cal/awb_cal */
 	cam_awb_cal = kobject_create_and_add("android_camera_awb_cal", NULL);
 	if (cam_awb_cal == NULL) {
 		pr_info("[CAM]cam_get_awb_cal: subsystem_register failed\n");
@@ -817,6 +851,8 @@ static int cam_get_awb_cal(void)
 		return ret ;
 	}
 
+   /* dev_attr_[register_name]<== DEVICE_ATTR(awb_cal, 0444,
+   awb_calibration_show, NULL); */
 	ret = sysfs_create_file(cam_awb_cal, &dev_attr_awb_cal.attr);
 	if (ret) {
 		pr_info("[CAM]cam_get_awb_cal:: sysfs_create_file failed\n");
@@ -846,7 +882,7 @@ static int cam_get_awb_cal(void)
 		goto end;
 	}
 
-	
+	//HTC_START, for in-house 3D cal
 	#ifdef InHouse3D_CAL
 	ret = sysfs_create_file(cam_awb_cal, &dev_attr_awb_cal_InHouse3D.attr);
 	if (ret) {
@@ -855,7 +891,7 @@ static int cam_get_awb_cal(void)
 		goto end;
 	}
 	#endif
-	
+	//HTC_END
 
 end:
 	return 0 ;
