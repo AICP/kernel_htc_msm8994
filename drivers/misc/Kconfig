@@ -657,4 +657,5 @@ source "drivers/misc/qcom/Kconfig"
 source "drivers/misc/headset/Kconfig"
 source "drivers/misc/fpr_Synaptics/Kconfig"
 source "drivers/misc/fpr_CrucialTec/Kconfig"
+source "drivers/misc/dts_eagle/Kconfig"
 endmenu
