@@ -72,3 +72,7 @@ obj-$(CONFIG_FPR_SYN)	+= fpr_Synaptics/
 obj-$(CONFIG_FPR_CT)	+= fpr_CrucialTec/
 obj-y				+= qcom/
 obj-y				+= headset/
+
+# DTS_EAGLE START
+obj-$(CONFIG_DTS_EAGLE)                           += dts_eagle/
+# DTS_EAGLE END
