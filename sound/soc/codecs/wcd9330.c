@@ -715,10 +715,12 @@ static int tomtom_update_uhqa_mode(struct snd_soc_codec *codec, int path)
 	int ret = 0;
 	struct tomtom_priv *tomtom_p = snd_soc_codec_get_drvdata(codec);
 
-	
+
 	if (((tomtom_get_sample_rate(codec, path) & 0xE0) == 0xA0) &&
 		(tomtom_compare_bit_format(codec, 24))) {
 		tomtom_p->uhqa_mode = 1;
+        } else if ((tomtom_compare_bit_format(codec, 16))) {
+               tomtom_p->uhqa_mode = 1;
 	} else {
 		tomtom_p->uhqa_mode = 0;
 	}
