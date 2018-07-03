@@ -652,9 +652,19 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 				nr_immediate++;
 				goto keep_locked;
 
-			
-			} else if (global_reclaim(sc) ||
-			    !PageReclaim(page) || !(sc->gfp_mask & __GFP_IO)) {
+			}else if (global_reclaim(sc) ||
+			    !PageReclaim(page) || !may_enter_fs) {
+				/*
+				 * This is slightly racy - end_page_writeback()
+				 * might have just cleared PageReclaim, then
+				 * setting PageReclaim here end up interpreted
+				 * as PageReadahead - but that does not matter
+				 * enough to care.  What we do want is for this
+				 * page to have PageReclaim set next time memcg
+				 * reclaim reaches the tests above, so it will
+				 * then wait_on_page_writeback() to avoid OOM;
+				 * and it's also appropriate in global reclaim.
+				 */
 				SetPageReclaim(page);
 				nr_writeback++;
 
