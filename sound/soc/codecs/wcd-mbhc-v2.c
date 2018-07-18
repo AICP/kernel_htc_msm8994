@@ -148,7 +148,7 @@ static void wcd_program_hs_vref(const struct wcd_mbhc *mbhc)
 
 	dev_dbg(card->dev, "%s: reg_val  = %x\n", __func__, reg_val);
 	snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_MBHC_BTN3_CTL,
-			0x3);
+			0x3, reg_val);
 }
 
 static void wcd_program_btn_threshold(const struct wcd_mbhc *mbhc, bool micbias)
