@@ -200,10 +200,6 @@ struct wcd_mbhc {
 	struct work_struct correct_plug_swch;
 	struct notifier_block nblock;
 };
-
-extern uint32_t g_ZL;
-extern uint32_t g_ZR;
-
 #define WCD_MBHC_CAL_SIZE(buttons, rload) ( \
 	sizeof(struct wcd_mbhc_general_cfg) + \
 	sizeof(struct wcd_mbhc_plug_detect_cfg) + \
@@ -255,8 +251,6 @@ extern uint32_t g_ZR;
 	sizeof(struct wcd_mbhc_imped_detect_cfg) + \
 	(cfg_ptr->_n_rload * \
 	(sizeof(cfg_ptr->_rload[0]) + sizeof(cfg_ptr->_alpha[0]))))
-
-void wcd_mbhc_plug_detect_for_debug_mode(struct wcd_mbhc *mbhc, int debug_mode);
 
 int wcd_mbhc_start(struct wcd_mbhc *mbhc,
 		       struct wcd_mbhc_config *mbhc_cfg);

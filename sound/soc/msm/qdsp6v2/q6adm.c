@@ -530,11 +530,11 @@ int srs_trumedia_open(int port_id, int copp_idx, __s32 srs_tech_id,
 		return -EINVAL;
 	}
 
-	if((atomic_read(&this_adm.copp.topology[port_idx][copp_idx]) !=
-		SRS_TRUMEDIA_TOPOLOGY_ID)) {
-		pr_err("%s: not TruMedia topology. Do not send params to DSP. port_id %#x  copp_idx %#x\n", __func__, port_id, copp_idx);
+    if((atomic_read(&this_adm.copp.topology[port_idx][copp_idx]) !=
+			SRS_TRUMEDIA_TOPOLOGY_ID)) {
+        pr_err("%s: not TruMedia topology. Do not send params to DSP. port_id %#x  copp_idx %#x\n", __func__, port_id, copp_idx);
 		return -EINVAL;
-	}
+    }
 
 	switch (srs_tech_id) {
 	case SRS_ID_GLOBAL: {
