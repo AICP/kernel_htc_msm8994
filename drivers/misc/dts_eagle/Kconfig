@@ -1,8 +1,0 @@
-config DTS_EAGLE
-	bool "DTS Eagle driver"
-	depends on SND_SOC_MSM8X16_WCD
-	default n
-	help
-	  Eagle is a DTS pre/post processing
-	  package that includes HeadphoneX. The configuration
-	  includes sending tuning parameters of various modules.
