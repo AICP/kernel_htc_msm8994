@@ -564,7 +564,7 @@ static void cpufreq_interactive_timer(unsigned long data)
 	if (new_freq == ppol->policy->max)
 		ppol->max_freq_hyst_start_time = now;
 
-	if (ppol->target_freq == new_freq) {
+	if (ppol->policy->cur == ppol->target_freq && ppol->target_freq == new_freq) {
 		trace_cpufreq_interactive_already(
 			max_cpu, cpu_load, ppol->target_freq,
 			ppol->policy->cur, new_freq);
