@@ -4,6 +4,22 @@
 
 
 #include <linux/ioctl.h>
+#include <linux/printk.h>
+
+/* If you are writing a driver, please use dev_dbg instead */
+#if defined(CONFIG_DYNAMIC_DEBUG)
+#include <linux/dynamic_debug.h>
+
+/* dynamic_pr_debug() uses pr_fmt() internally so we don't need it here */
+#define dts_eagle_drv_dbg_msg(fmt, ...) \
+    dynamic_pr_debug(fmt, ##__VA_ARGS__)
+#elif defined(DEBUG)
+#define dts_eagle_drv_dbg_msg(fmt, ...)  \
+    (printk(KERN_INFO "DTS_EAGLE_DRIVER: " fmt "\n", ##__VA_ARGS__))
+#else
+#define dts_eagle_drv_dbg_msg(fmt, ...) \
+    (no_printk(KERN_INFO "DTS_EAGLE_DRIVER: " fmt "\n", ##__VA_ARGS__))
+#endif
 
 #define EAGLE_DRIVER_ID 0xF2
 

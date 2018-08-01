@@ -25,6 +25,7 @@
 #include <sound/asound.h>
 #include <sound/msm-dts-eagle.h>
 #include "msm-dts-srs-tm-config.h"
+#include <sound/adsp_err.h>
 
 #include <linux/delay.h>
 #undef pr_info
@@ -371,7 +372,7 @@ int adm_dts_eagle_set(int port_id, int copp_idx, int param_id,
 
 	admp.hdr.hdr_field = APR_HDR_FIELD(APR_MSG_TYPE_SEQ_CMD,
 		APR_HDR_LEN(APR_HDR_SIZE), APR_PKT_VER);
-	admp.hdr.pkt_size = APR_PKT_SIZE(APR_HDR_SIZE, sizeof(admp));
+	admp.hdr.pkt_size = sizeof(admp);
 	admp.hdr.src_svc = APR_SVC_ADM;
 	admp.hdr.src_domain = APR_DOMAIN_APPS;
 	admp.hdr.src_port = port_id;
@@ -390,7 +391,7 @@ int adm_dts_eagle_set(int port_id, int copp_idx, int param_id,
 			__func__, admp.hdr.dest_port,
 			admp.payload_size, AUDPROC_MODULE_ID_DTS_HPX_POSTMIX,
 			param_id);
-	atomic_set(&this_adm.copp.stat[p_idx][copp_idx], 0);
+	atomic_set(&this_adm.copp.stat[p_idx][copp_idx], -1);
 	ret = apr_send_pkt(this_adm.apr, (uint32_t *)&admp);
 	if (ret < 0) {
 		pr_err("DTS_EAGLE_ADM: %s - ADM enable for port %d failed\n",
@@ -399,12 +400,22 @@ int adm_dts_eagle_set(int port_id, int copp_idx, int param_id,
 		goto fail_cmd;
 	}
 	ret = wait_event_timeout(this_adm.copp.wait[p_idx][copp_idx],
-			atomic_read(&this_adm.copp.stat[p_idx][copp_idx]),
+			atomic_read(&this_adm.copp.stat
+			[p_idx][copp_idx]) >= 0,
 			msecs_to_jiffies(TIMEOUT_MS));
 	if (!ret) {
 		pr_err("DTS_EAGLE_ADM: %s - set params timed out port = %d\n",
 			__func__, port_id);
 		ret = -EINVAL;
+	} else if (atomic_read(&this_adm.copp.stat
+				[p_idx][copp_idx]) > 0) {
+		pr_err("%s: DSP returned error[%s]\n",
+				__func__, adsp_err_get_err_str(
+				atomic_read(&this_adm.copp.stat
+				[p_idx][copp_idx])));
+		ret = adsp_err_get_lnx_err_code(
+				atomic_read(&this_adm.copp.stat
+				[p_idx][copp_idx]));
 	} else {
 		ret = 0;
 	}
@@ -468,7 +479,7 @@ int adm_dts_eagle_get(int port_id, int copp_idx, int param_id,
 
 	admp.hdr.hdr_field = APR_HDR_FIELD(APR_MSG_TYPE_SEQ_CMD,
 			     APR_HDR_LEN(APR_HDR_SIZE), APR_PKT_VER);
-	admp.hdr.pkt_size = APR_PKT_SIZE(APR_HDR_SIZE, sizeof(admp));
+	admp.hdr.pkt_size = sizeof(admp);
 	admp.hdr.src_svc = APR_SVC_ADM;
 	admp.hdr.src_domain = APR_DOMAIN_APPS;
 	admp.hdr.src_port = port_id;
@@ -488,7 +499,7 @@ int adm_dts_eagle_get(int port_id, int copp_idx, int param_id,
 	admp.param_max_size = size + sizeof(struct adm_param_data_v5);
 	admp.reserved = 0;
 
-	atomic_set(&this_adm.copp.stat[p_idx][copp_idx], 0);
+	atomic_set(&this_adm.copp.stat[p_idx][copp_idx], -1);
 
 	ret = apr_send_pkt(this_adm.apr, (uint32_t *)&admp);
 	if (ret < 0) {
@@ -498,12 +509,23 @@ int adm_dts_eagle_get(int port_id, int copp_idx, int param_id,
 		goto fail_cmd;
 	}
 	ret = wait_event_timeout(this_adm.copp.wait[p_idx][copp_idx],
-			atomic_read(&this_adm.copp.stat[p_idx][copp_idx]),
+			atomic_read(&this_adm.copp.stat
+			[p_idx][copp_idx]) >= 0,
 			msecs_to_jiffies(TIMEOUT_MS));
 	if (!ret) {
 		pr_err("DTS_EAGLE_ADM: %s - EAGLE get params timed out port = %d\n",
 			__func__, port_id);
 		ret = -EINVAL;
+		goto fail_cmd;
+	} else if (atomic_read(&this_adm.copp.stat
+				[p_idx][copp_idx]) > 0) {
+		pr_err("%s: DSP returned error[%s]\n",
+				__func__, adsp_err_get_err_str(
+				atomic_read(&this_adm.copp.stat
+				[p_idx][copp_idx])));
+		ret = adsp_err_get_lnx_err_code(
+				atomic_read(&this_adm.copp.stat
+					[p_idx][copp_idx]));
 		goto fail_cmd;
 	}
 
@@ -530,11 +552,11 @@ int srs_trumedia_open(int port_id, int copp_idx, __s32 srs_tech_id,
 		return -EINVAL;
 	}
 
-	if((atomic_read(&this_adm.copp.topology[port_idx][copp_idx]) !=
-		SRS_TRUMEDIA_TOPOLOGY_ID)) {
-		pr_err("%s: not TruMedia topology. Do not send params to DSP. port_id %#x  copp_idx %#x\n", __func__, port_id, copp_idx);
+    if((atomic_read(&this_adm.copp.topology[port_idx][copp_idx]) !=
+			SRS_TRUMEDIA_TOPOLOGY_ID)) {
+        pr_err("%s: not TruMedia topology. Do not send params to DSP. port_id %#x  copp_idx %#x\n", __func__, port_id, copp_idx);
 		return -EINVAL;
-	}
+    }
 
 	switch (srs_tech_id) {
 	case SRS_ID_GLOBAL: {
@@ -2235,6 +2257,13 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 		topology = NULL_COPP_TOPOLOGY;
 	}
 
+	/* For DTS EAGLE only, force 24 bit */
+	if ((topology == ADM_CMD_COPP_OPEN_TOPOLOGY_ID_DTS_HPX) &&
+		(perf_mode == LEGACY_PCM_MODE)) {
+		bit_width = 24;
+		pr_debug("%s: Force open adm in 24-bit for DTS HPX topology 0x%x\n",
+			__func__, topology);
+	}
 	port_id = q6audio_convert_virtual_to_portid(port_id);
 	port_idx = adm_validate_and_get_port_index(port_id);
 	if (port_idx < 0) {
