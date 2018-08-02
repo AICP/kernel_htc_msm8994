@@ -893,6 +893,12 @@ static int __handoff_clk(struct clk *clk)
 			goto err;
 
 
+		/*
+		 * Handoff functions for the parent must be called before the
+		 * children can be handed off. Without handing off the parents and
+		 * knowing their rate and state (on/off), it's impossible to figure
+		 * out the rate and state of the children.
+		 */
 		if (clk->ops->get_parent)
 		clk->parent = clk->ops->get_parent(clk);
 

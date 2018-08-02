@@ -14,6 +14,7 @@
 #define RAILWAY_SVS_NOMINAL		(5)
 #define RAILWAY_SVS_SUPER_TURBO		(8)
 
+/* Public HTC RPM CMD */
 int htc_rpm_cmd_vote_vdd_dig(uint32_t corner);
 
 #endif

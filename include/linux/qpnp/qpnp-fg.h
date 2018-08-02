@@ -24,6 +24,11 @@
 
 #ifdef CONFIG_QPNP_FG
 #ifdef CONFIG_HTC_BATT_8960
+/**
+ * pm8941_is_pwr_src_plugged_in - is usb or dc plugged in
+ *
+ * if usb or dc is under voltage or over voltage this will return false
+ */
 
 extern bool flag_keep_charge_on;
 extern bool flag_pa_fake_batt_temp;
@@ -49,9 +54,12 @@ int pmi8994_fg_store_battery_gauge_data_emmc(void);
 int pmi8994_fg_get_battery_ui_soc(void);
 int pmi8994_fg_store_battery_ui_soc(int soc_ui);
 int pmi8994_fg_check_consistent(void);
+void pmi8994_fg_get_batt_cycle(unsigned int *total_level, unsigned int *overheat_sec,
+				unsigned int *first_use_time, unsigned int *batt_checksum);
+int emmc_misc_write(int val, int offset);
 
-#endif
-#else 
+#endif/* CONFIG_HTC_BATT_8960 */
+#else /* CONFIG_QPNP_FG */
 #ifdef CONFIG_HTC_BATT_8960
 
 
@@ -99,8 +107,13 @@ static inline int pmi8994_fg_check_consistent(void)
 {
 	return -ENXIO;
 }
+static inline void pmi8994_fg_get_batt_cycle(unsigned int *total_level, unsigned int *overheat_sec,
+						unsigned int *first_use_time, unsigned int *batt_checksum)
+{
+	return -ENXIO;
+}
 
-#endif 
-#endif 
-#endif 
+#endif /* CONFIG_HTC_BATT_8960 */
+#endif /* CONFIG_QPNP_FG */
+#endif /* __QPNP_FG_H */
 

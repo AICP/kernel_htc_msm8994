@@ -49,17 +49,29 @@ int __attribute__ ((weak)) wifi_get_fw_nv_path(char *fw, char *nv) { return 0;};
 
 #if defined(BCMLXSDMMC)
 extern int sdioh_mmc_irq(int irq);
-#endif 
+#endif /* (BCMLXSDMMC)  */
 
 #if defined(CUSTOMER_HW3) || defined(PLATFORM_MPS)
 #include <mach/gpio.h>
 #endif
 
+/* Customer specific Host GPIO defintion  */
 static int dhd_oob_gpio_num = -1;
 
 module_param(dhd_oob_gpio_num, int, 0644);
 MODULE_PARM_DESC(dhd_oob_gpio_num, "DHD oob gpio number");
 
+/* This function will return:
+ *  1) return :  Host gpio interrupt number per customer platform
+ *  2) irq_flags_ptr : Type of Host interrupt as Level or Edge
+ *
+ *  NOTE :
+ *  Customer should check his platform definitions
+ *  and his Host Interrupt spec
+ *  to figure out the proper setting for his platform.
+ *  Broadcom provides just reference settings as example.
+ *
+ */
 int dhd_customer_oob_irq_map(void *adapter, unsigned long *irq_flags_ptr)
 {
 	int  host_oob_irq = 0;
@@ -72,7 +84,7 @@ int dhd_customer_oob_irq_map(void *adapter, unsigned long *irq_flags_ptr)
 	if (dhd_oob_gpio_num < 0) {
 		dhd_oob_gpio_num = CUSTOM_OOB_GPIO_NUM;
 	}
-#endif 
+#endif /* CUSTOMER_OOB_GPIO_NUM */
 
 	if (dhd_oob_gpio_num < 0) {
 		WL_ERROR(("%s: ERROR customer specific Host GPIO is NOT defined \n",
@@ -87,13 +99,14 @@ int dhd_customer_oob_irq_map(void *adapter, unsigned long *irq_flags_ptr)
 	gpio_request(dhd_oob_gpio_num, "oob irq");
 	host_oob_irq = gpio_to_irq(dhd_oob_gpio_num);
 	gpio_direction_input(dhd_oob_gpio_num);
-#endif 
+#endif /* defined CUSTOMER_HW3 || defined(PLATFORM_MPS) */
 #endif 
 
 	return (host_oob_irq);
 }
 #endif 
 
+/* Customer function to control hw specific wlan gpios */
 int
 dhd_customer_gpio_wlan_ctrl(void *adapter, int onoff)
 {
@@ -103,6 +116,7 @@ dhd_customer_gpio_wlan_ctrl(void *adapter, int onoff)
 }
 
 #ifdef GET_CUSTOM_MAC_ENABLE
+/* Function to get custom MAC address */
 int
 dhd_custom_get_mac_address(void *adapter, unsigned char *buf)
 {
@@ -112,30 +126,32 @@ dhd_custom_get_mac_address(void *adapter, unsigned char *buf)
 	if (!buf)
 		return -EINVAL;
 
-	
+	/* Customer access to MAC address stored outside of DHD driver */
 #if (defined(CUSTOMER_HW2) || defined(CUSTOMER_HW10)) && (LINUX_VERSION_CODE >= \
 	KERNEL_VERSION(2, 6, 35))
 	ret = wifi_platform_get_mac_addr(adapter, buf);
 #endif
 
 #ifdef EXAMPLE_GET_MAC
-	
+	/* EXAMPLE code */
 	{
 		struct ether_addr ea_example = {{0x00, 0x11, 0x22, 0x33, 0x44, 0xFF}};
 		bcopy((char *)&ea_example, buf, sizeof(struct ether_addr));
 	}
-#endif 
+#endif /* EXAMPLE_GET_MAC */
 
 	return ret;
 }
-#endif 
+#endif /* GET_CUSTOM_MAC_ENABLE */
 
+/* Customized Locale table : OPTIONAL feature */
 const struct cntry_locales_custom translate_custom_table[] = {
+/* Table should be filled out based on custom platform regulatory requirement */
 #ifdef EXAMPLE_TABLE
-	{"",   "XY", 4},  
-	{"US", "US", 69}, 
-	{"CA", "US", 69}, 
-	{"EU", "EU", 5},  
+	{"",   "XY", 4},  /* Universal if Country code is unknown or empty */
+	{"US", "US", 69}, /* input ISO "US" to : US regrev 69 */
+	{"CA", "US", 69}, /* input ISO "CA" to : US regrev 69 */
+	{"EU", "EU", 5},  /* European union countries to : EU regrev 05 */
 	{"AT", "EU", 5},
 	{"BE", "EU", 5},
 	{"BG", "EU", 5},
@@ -166,7 +182,7 @@ const struct cntry_locales_custom translate_custom_table[] = {
 	{"GB", "EU", 5},
 	{"KR", "XY", 3},
 	{"AU", "XY", 3},
-	{"CN", "XY", 3}, 
+	{"CN", "XY", 3}, /* input ISO "CN" to : XY regrev 03 */
 	{"TW", "XY", 3},
 	{"AR", "XY", 3},
 	{"MX", "XY", 3},
@@ -174,10 +190,10 @@ const struct cntry_locales_custom translate_custom_table[] = {
 	{"CH", "CH", 0},
 	{"TR", "TR", 0},
 	{"NO", "NO", 0},
-#endif 
+#endif /* EXMAPLE_TABLE */
 #if defined(CUSTOMER_HW2) && !defined(CUSTOMER_HW5) && !defined(CUSTOMER_HW_ONE)
 #if defined(BCM4335_CHIP)
-	{"",   "XZ", 11},  
+	{"",   "XZ", 11},  /* Universal if Country code is unknown or empty */
 #endif
 	{"AE", "AE", 1},
 	{"AR", "AR", 1},
@@ -225,13 +241,13 @@ const struct cntry_locales_custom translate_custom_table[] = {
 	{"SK", "SK", 1},
 	{"TR", "TR", 7},
 	{"TW", "TW", 1},
-	{"IR", "XZ", 11},	
-	{"SD", "XZ", 11},	
-	{"SY", "XZ", 11},	
-	{"GL", "XZ", 11},	
-	{"PS", "XZ", 11},	
-	{"TL", "XZ", 11},	
-	{"MH", "XZ", 11},	
+	{"IR", "XZ", 11},	/* Universal if Country code is IRAN, (ISLAMIC REPUBLIC OF) */
+	{"SD", "XZ", 11},	/* Universal if Country code is SUDAN */
+	{"SY", "XZ", 11},	/* Universal if Country code is SYRIAN ARAB REPUBLIC */
+	{"GL", "XZ", 11},	/* Universal if Country code is GREENLAND */
+	{"PS", "XZ", 11},	/* Universal if Country code is PALESTINIAN TERRITORY, OCCUPIED */
+	{"TL", "XZ", 11},	/* Universal if Country code is TIMOR-LESTE (EAST TIMOR) */
+	{"MH", "XZ", 11},	/* Universal if Country code is MARSHALL ISLANDS */
 #ifdef BCM4330_CHIP
 	{"RU", "RU", 1},
 	{"US", "US", 5}
@@ -373,62 +389,100 @@ const struct cntry_locales_custom translate_custom_table[] = {
 	{"XV", "XV", 17},
 	{"Q1", "Q1", 77},
 #elif defined(CUSTOMER_HW_ONE)
-	{"",   "XZ", 11}, 
+	{"",   "XZ", 11}, /* Universal if Country code is unknown or empty */
 	{"AM", "AM", 1},
-	{"AR", "AR", 23},
-	{"AU", "AU", 4},
-	{"BG", "BG", 3},
+	{"AR", "AR", 21},
+	{"AU", "AU", 6},
+#ifdef HTC_ACA_FLAG
+	{"BG", "DE", 13},
+#else
+	{"BG", "BG", 4},
+#endif
 	{"BH", "BH", 4},
-	{"BR", "BR", 2},
+	{"BR", "BR", 15},
 	{"CA", "CA", 31},
 	{"CL", "CL", 0},
 	{"CN", "CN", 38},
 	{"CO", "CO", 17},
-	{"DE", "DE", 6},
-	{"DZ", "XZ", 1},
-	{"EG", "EG", 2},
-	{"ES", "ES", 3},
-	{"FR", "FR", 3},
-	{"HK", "HK", 1},
-	{"ID", "ID", 11},
-	{"IL", "IL", 5},
-	{"IN", "IN", 2},
+#ifdef HTC_ACA_FLAG
+	{"DE", "DE", 13},
+#else
+	{"DE", "DE", 7},
+#endif
+	{"DZ", "XZ", 11},
+	{"EG", "VE", 3},
+#ifdef HTC_ACA_FLAG
+	{"ES", "DE", 13},
+	{"FR", "DE", 13},
+#else
+	{"ES", "ES", 4},
+	{"FR", "FR", 5},
+#endif
+	{"HK", "HK", 2},
+	{"ID", "ID", 5},
+	{"IL", "IL", 7},
+	{"IN", "IN", 3},
+#ifdef HTC_ACA_FLAG
+	{"IQ", "DE", 13},
+#else
 	{"IQ", "IQ", 0},
-	{"JO", "JO", 4},
+#endif
+	{"JO", "JO", 3},
 	{"JP", "JP", 45},
 	{"KR", "KR", 4},
 	{"KW", "KW", 5},
-	{"KZ", "KZ", 212},
+	{"KZ", "KZ", 0},
 	{"LB", "LB", 3},
-	{"LY", "FR", 3},
-	{"MA", "MA", 2},
-	{"MM", "MM", 5},
+	{"LY", "XZ", 11},
+	{"MA", "IL", 7},
+	{"MM", "MM", 0},
 	{"MY", "MY", 19},
-	{"MX", "MX", 24},
-	{"NZ", "NZ", 2},
+	{"MX", "MX", 20},
+	{"NZ", "NZ", 4},
 	{"OM", "OM", 4},
 	{"PE", "PE", 20},
-	{"PH", "PH", 3},
+	{"PH", "PH", 5},
 	{"PR", "PR", 20},
 	{"QA", "QA", 0},
+#ifdef HTC_ACA_FLAG
+	{"RS", "DE", 13},
+#else
 	{"RS", "RS", 2},
+#endif
 	{"RU", "RU", 62},
 	{"SA", "SA", 0},
-	{"SG", "SG", 11},
-	{"TH", "TH", 3},
+	{"SG", "TH", 5},
+	{"TH", "TH", 5},
+#ifdef HTC_ACA_FLAG
+	{"TN", "TN", 1},
+	{"TR", "DE", 13},
+#else
 	{"TN", "TN", 0},
 	{"TR", "TR", 7},
+#endif
 	{"TW", "TW", 65},
-	{"UA", "UA", 12},
-	{"US", "US", 111},
-	{"VE", "VE", 2},
-	{"VN", "VN", 2},
+	{"UA", "UA", 13},
+#ifdef HTC_ACA_FLAG
+	{"US", "US", 140},
+#else
+	{"US", "US", 0},
+#endif
+	{"VE", "VE", 3},
+	{"VN", "VN", 4},
 	{"YE", "YE", 0},
-	{"ZA", "ZA", 3},
-#endif 
+#ifdef HTC_ACA_FLAG
+	{"ZA", "VN", 4},
+#else
+	{"ZA", "ZA", 0},
+#endif
+#endif /* CUSTOMER_HW2 and  CUSTOMER_HW5 and CUSTOMER_HW_ONE */
 };
 
 
+/* Customized Locale convertor
+*  input : ISO 3166-1 country abbreviation
+*  output: customized cspec
+*/
 void get_customized_country_code(void *adapter, char *country_iso_code, wl_country_t *cspec)
 {
 #if defined(CUSTOMER_HW2) && (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 39)) && \
@@ -465,10 +519,10 @@ void get_customized_country_code(void *adapter, char *country_iso_code, wl_count
 		}
 	}
 #if defined(EXAMPLE_TABLE) || defined(CUSTOMER_HW_ONE)
-	
+	/* if no country code matched return first universal code from translate_custom_table */
 	memcpy(cspec->ccode, translate_custom_table[0].custom_locale, WLC_CNTRY_BUF_SZ);
 	cspec->rev = translate_custom_table[0].custom_locale_rev;
-#endif 
+#endif /* EXMAPLE_TABLE || CUSTOMER_HW_ONE */
 	return;
-#endif 
+#endif /* defined(CUSTOMER_HW2) && (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 36)) */
 }

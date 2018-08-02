@@ -32,7 +32,7 @@ extern void net_dumplog(void);
 #define NET_DEBUG(fmt, args...) \
 do{ \
 	if(htc_net_debug_enable) \
-		net_dbg_log_event("[NET]" fmt, args); \
+		net_dbg_log_event("[NET]" fmt, ##args); \
 } while(0)
 #else
 static inline void net_dumplog(void)
@@ -42,4 +42,4 @@ static inline void net_dumplog(void)
 #define NET_DEBUG(fmt, args...) do { } while(0)
 #endif
 
-#endif 
+#endif /* end of _HTC_NET_DEBUG_H */

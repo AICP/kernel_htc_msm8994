@@ -18,6 +18,7 @@
 #include "msm8994-htc-ramdumpheap.dtsi"
 #include "msm8994-touch-hima.dtsi"
 #include "msm8994-camera-sensor-hima.dtsi"
+#include "msm8994-htc_hima-audio.dtsi"
 
 / {
 	model = "HTC Corporation. MSM8994 HIMA";
@@ -80,6 +81,14 @@
 
 / {
 	memory {
+                removed_regions_3: removed_regions_3@0 {
+                        linux,reserve-contiguous-region;
+                        linux,reserve-region;
+                        linux,remove-completely;
+                        reg = <0 0x06500000 0 0x500000>;
+                        label = "memory_hole";
+                };
+
 		fb_mem_1: fb_1st_region@0 {
 			linux,reserve-contiguous-region;
 			linux,reserve-region;
@@ -90,7 +99,7 @@
 		fb_mem_2: fb_2nd_region@0 {
 			linux,reserve-contiguous-region;
 			linux,reserve-region;
-			reg = <0 0x30A00000 0 0x1200000>;
+			reg = <0 0x30A00000 0 0x1C00000>;
 			label = "fb_mem_2";
 		};
 	};
@@ -145,7 +154,25 @@
 
 
 	};
-
+//HTC DISP MHL ++
+	i2c@f9928000 { 	/*BLSP6, namely BLSP2 QUP0 */
+		status = "ok";
+		mhl_sii8620: sii8620@72 {
+			compatible = "mhl-sii8620";
+			reg = <0x72>;
+			interrupt-parent = <&msm_gpio>;
+			interrupts = <26 0x8>;
+			mhl-intr-gpio = <&msm_gpio 26 0>;
+			mhl-rst-gpio = <&msm_gpio 25 0>;
+			mhl-fw-wake-gpio = <&msm_gpio 93 0>;
+			mhl-dpdn-gpio = <&msm_gpio 57 0>;
+			mhl-dpdn-gpio_ = <&msm_gpio 57 0>;
+			avcc_1v-supply = <&pm8994_l25>;
+			vbus_dwc3-supply = <&pmi8994_otg_supply>;
+			qcom,hdmi-tx-map = <&mdss_hdmi_tx>;
+		};
+	};
+//HTC DISP MHL --
 	htc,htc_nc_pins {
 		compatible = "htc,nc_pin";
 
@@ -185,6 +212,37 @@
 			qcom,ion-heap-type = "DMA";
 		};
 	};
+
+        qcom,qseecom@6500000 {
+                compatible = "qcom,qseecom";
+                reg = <0x6500000 0x500000>;
+                reg-names = "secapp-region";
+                qcom,disk-encrypt-pipe-pair = <2>;
+                qcom,file-encrypt-pipe-pair = <0>;
+                qcom,support-multiple-ce-hw-instance;
+                qcom,hlos-num-ce-hw-instances = <2>;
+                qcom,hlos-ce-hw-instance = <1 2>;
+                qcom,qsee-ce-hw-instance = <0>;
+                qcom,msm-bus,name = "qseecom-noc";
+                qcom,msm-bus,num-cases = <4>;
+                qcom,msm-bus,num-paths = <1>;
+                qcom,support-fde;
+                qcom,support-pfe;
+                qcom,no-clock-support;
+                qcom,msm-bus,vectors-KBps =
+                                <55 512 0 0>,
+                                <55 512 0 0>,
+                                <55 512 120000 1200000>,
+                                <55 512 393600 3936000>;
+                clock-names = "core_clk", "ufs_core_clk_src", "ufs_core_clk",
+                              "ufs_bus_clk", "ufs_iface_clk";
+                clocks = <&clock_rpm clk_qseecom_ce1_clk>,
+                         <&clock_gcc clk_ufs_axi_clk_src>,
+                         <&clock_gcc clk_gcc_ufs_axi_clk>,
+                         <&clock_gcc clk_gcc_sys_noc_ufs_axi_clk>,
+                         <&clock_gcc clk_gcc_ufs_ahb_clk>;
+                qcom,ce-opp-freq = <171430000>;
+        };
 };
 
 &spmi_bus {
@@ -222,6 +280,7 @@
         };
 
         qcom,leds@d800 {
+            qcom,ilim-ma = <980>;
             qcom,fs-curr-ua = <20000>;    /*Fulfill hTC design 20mA*/
             qcom,led-strings-list = [00 01];
             qcom,en-cabc;

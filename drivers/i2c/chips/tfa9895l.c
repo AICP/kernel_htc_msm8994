@@ -33,11 +33,13 @@
 #include <linux/of_gpio.h>
 #include <sound/htc_acoustic_alsa.h>
 
+/* htc audio ++ */
 #undef pr_info
 #undef pr_err
 #define pr_aud_fmt(fmt) "[AUD] " KBUILD_MODNAME ": " fmt
 #define pr_info(fmt, ...) printk(KERN_INFO pr_aud_fmt(fmt), ##__VA_ARGS__)
 #define pr_err(fmt, ...) printk(KERN_ERR pr_aud_fmt(fmt), ##__VA_ARGS__)
+/* htc audio -- */
 
 static struct i2c_client *this_client;
 struct mutex spk_ampl_lock;
@@ -111,7 +113,7 @@ static ssize_t codec_debug_write(struct file *filp,
 	lbuf[cnt] = '\0';
 
 	if (!strcmp(access_str, "poke")) {
-		
+		/* write */
 		rc = get_parameters(lbuf, param, 2);
 		if ((param[0] <= 0xFF) && (param[1] <= 0xFF) &&
 			(rc == 0)) {
@@ -121,7 +123,7 @@ static ssize_t codec_debug_write(struct file *filp,
 		} else
 			rc = -EINVAL;
 	} else if (!strcmp(access_str, "peek")) {
-		
+		/* read */
 		rc = get_parameters(lbuf, param, 1);
 		if ((param[0] <= 0xFF) && (rc == 0)) {
 			reg_idx[0] = param[0];
@@ -226,18 +228,18 @@ int set_tfa9895l_spkamp(int en, int dsp_mode)
 	unsigned char power_data[3] = {0, 0, 0};
 	unsigned char SPK_CR[3] = {0x8, 0x8, 0};
 
-	pr_info("%s: en = %d dsp_enabled = %d\n", __func__, en, dspl_enabled);
+	pr_debug("%s: en = %d dsp_enabled = %d\n", __func__, en, dspl_enabled);
 	mutex_lock(&spk_ampl_lock);
 	if (en && !last_spkampl_state) {
 		last_spkampl_state = 1;
-		
+		/* NXP CF DSP Bypass mode */
 		if (dspl_enabled == 0) {
 			for (i = 0; i < 3; i++)
 				tfa9895_i2c_write(cf_dspl_bypass[i], 3);
-		
+		/* Enable NXP PVP Bit10 of Reg 8 per acoustic's request in bypass mode.(Hboot loopback & MFG ROM) */
 				tfa9895_i2c_write(SPK_CR, 1);
 				tfa9895_i2c_read(SPK_CR + 1, 2);
-				SPK_CR[1] |= 0x4; 
+				SPK_CR[1] |= 0x4; /* Enable PVP bit10 */
 				tfa9895_i2c_write(SPK_CR, 3);
 		} else {
 			tfa9895_i2c_write(power_reg, 1);
@@ -245,12 +247,12 @@ int set_tfa9895l_spkamp(int en, int dsp_mode)
 			tfa9895_i2c_write(mute_reg, 1);
 			tfa9895_i2c_read(mute_data + 1, 2);
 			mute_data[0] = 0x6;
-			mute_data[2] &= 0xdf;  
+			mute_data[2] &= 0xdf;  /* bit 5 dn = un=mute */
 			power_data[0] = 0x9;
-			power_data[2] &= 0xfe; 
+			power_data[2] &= 0xfe; /* bit 0 dn = power up */
 			tfa9895_i2c_write(power_data, 3);
 			tfa9895_i2c_write(mute_data, 3);
-			power_data[2] |= 0x8;  
+			power_data[2] |= 0x8;  /* bit 3 Up = AMP on */
 			tfa9895_i2c_write(power_data, 3);
 		}
 	} else if (!en && last_spkampl_state) {
@@ -263,14 +265,14 @@ int set_tfa9895l_spkamp(int en, int dsp_mode)
 			tfa9895_i2c_write(mute_reg, 1);
 			tfa9895_i2c_read(mute_data + 1, 2);
 			mute_data[0] = 0x6;
-			mute_data[2] |= 0x20; 
+			mute_data[2] |= 0x20; /* bit 5 up = mute */
 			tfa9895_i2c_write(mute_data, 3);
 			tfa9895_i2c_write(power_reg, 1);
 			tfa9895_i2c_read(power_data + 1, 2);
 			power_data[0] = 0x9;
-			power_data[2] &= 0xf7;  
+			power_data[2] &= 0xf7;  /* bit 3 down = AMP off */
 			tfa9895_i2c_write(power_data, 3);
-			power_data[2] |= 0x1;  
+			power_data[2] |= 0x1;  /* bit 0 up = power down */
 			tfa9895_i2c_write(power_data, 3);
 		}
 	}
@@ -287,10 +289,10 @@ int tfa9895l_disable(bool disable)
 	};
 
 	if (disable) {
-		pr_info("%s: speaker_l switch off!\n", __func__);
+		pr_debug("%s: speaker_l switch off!\n", __func__);
 		rc = tfa9895_i2c_write(ampl_off[0], 3);
 	} else {
-		pr_info("%s: speaker_l switch on!\n", __func__);
+		pr_debug("%s: speaker_l switch on!\n", __func__);
 		rc = tfa9895_i2c_write(ampl_on[0], 3);
 	}
 
@@ -335,15 +337,15 @@ static long tfa9895l_ioctl(struct file *file, unsigned int cmd,
 		rc = tfa9895_i2c_read(((struct tfa9895_i2c_buffer *)buf)->buffer, ((struct tfa9895_i2c_buffer *)buf)->size);
 		break;
 	case TFA9895_ENABLE_DSP_NR:
-		pr_info("%s: TFA9895_ENABLE_DSP %d\n", __func__, *(int *)buf);
+		pr_debug("%s: TFA9895_ENABLE_DSP %d\n", __func__, *(int *)buf);
 		dspl_enabled = *(int *)buf;
 		break;
 	case TFA9895_KERNEL_LOCK_NR:
-		pr_info("%s: TFA9895_KERNEL_LOCK (L) %d\n", __func__, *(int *)buf);
+		pr_debug("%s: TFA9895_KERNEL_LOCK (L) %d\n", __func__, *(int *)buf);
 		if(*(int *)buf) {
 			mutex_lock(&spk_ampl_lock);
 			lock_from_userspace ++;
-			
+			//pr_info("%s: TFA9895_KERNEL_LOCK (L) %d (LOCK), kernel count %d, userspace count %d\n", __func__, *(int *)buf, atomic_read(&(spk_ampl_lock.count)), lock_from_userspace);
 		}
 		else {
 			lock_from_userspace --;
@@ -353,12 +355,12 @@ static long tfa9895l_ioctl(struct file *file, unsigned int cmd,
 						"don't unlock it again", __func__);
 				lock_from_userspace = 0;
 			}
-			
+			//pr_info("%s: TFA9895_KERNEL_LOCK (L) %d (UNLOCK), kernel count %d, userspace count %d\n", __func__, *(int *)buf, atomic_read(&(spk_ampl_lock.count)), lock_from_userspace);
 		}
-		
+		//pr_info("%s: TFA9895_KERNEL_LOCK (L) %d --\n", __func__, *(int *)buf);
 		break;
 	case _IOC_NR(TFA9895_KERNEL_INIT_NR):
-		pr_info("%s: TFA9895_KERNEL_INIT_NR (L) ++ count %d\n",
+		pr_debug("%s: TFA9895_KERNEL_INIT_NR (L) ++ count %d\n",
 				__func__, atomic_read(&(spk_ampl_lock.count)));
 		while (lock_from_userspace > 0) {
 			pr_info("%s: TFA9895_KERNEL_INIT_NR (L) lock count from userspace %d != 0, unlock it\n",
@@ -368,7 +370,7 @@ static long tfa9895l_ioctl(struct file *file, unsigned int cmd,
 		}
 		lock_from_userspace = 0;
 		mutex_init(&spk_ampl_lock);
-		pr_info("%s: TFA9895_KERNEL_INIT_NR (L) -- count %d\n",
+		pr_debug("%s: TFA9895_KERNEL_INIT_NR (L) -- count %d\n",
 				__func__, atomic_read(&(spk_ampl_lock.count)));
 		break;
 	default:
@@ -453,10 +455,10 @@ int tfa9895l_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 	for (i = 0; i < 3; i++)
 		tfa9895_i2c_write(cf_dspl_bypass[i], 3);
-		
+		/* Enable NXP PVP Bit10 of Reg 8 per acoustic's request in bypass mode.(Hboot loopback & MFG ROM) */
 		tfa9895_i2c_write(SPK_CR, 1);
 		tfa9895_i2c_read(SPK_CR + 1, 2);
-		SPK_CR[1] |= 0x4; 
+		SPK_CR[1] |= 0x4; /* Enable PVP bit10 */
 		tfa9895_i2c_write(SPK_CR, 3);
 
 	return 0;

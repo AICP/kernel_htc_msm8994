@@ -1,6 +1,6 @@
 /* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
  *
- * This program is free software; you can redistribute it and/or modify
+ This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
  * only version 2 as published by the Free Software Foundation.
  *
@@ -35,6 +35,7 @@
 #include "mdss_fb.h"
 #include "mdss_mdp.h"
 #include "mdss_mdp_rotator.h"
+#include "mdss_htc_util.h"
 
 #define VSYNC_PERIOD 16
 #define BORDERFILL_NDX	0x0BF000BF
@@ -3719,6 +3720,9 @@ static int mdss_mdp_pp_ioctl(struct msm_fb_data_type *mfd,
 		break;
 
 	case mdp_op_pcc_cfg:
+		/* HTC: display calibration for RGB*/
+		htc_update_rgb_cali_data(mfd, &mdp_pp.data.pcc_cfg_data);
+
 		ret = mdss_mdp_pcc_config(&mdp_pp.data.pcc_cfg_data,
 					&copyback);
 		break;

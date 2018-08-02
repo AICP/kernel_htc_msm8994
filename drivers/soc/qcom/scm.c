@@ -41,6 +41,7 @@ static DEFINE_MUTEX(scm_lock);
 
 #define RESTORE_SEC_CFG    2
 
+/* arguments from 8994 kgsl_iommu */
 #define IOMMU_SEC_ID	18
 #define IOMMU_SPARE_NUM	0
 
@@ -622,6 +623,27 @@ static inline bool is_restore_cfg(u32 fn_id, struct scm_desc *desc)
 		desc->args[1] == IOMMU_SPARE_NUM;
 }
 
+/**
+ * scm_call2() - Invoke a syscall in the secure world
+ * @fn_id: The function ID for this syscall
+ * @desc: Descriptor structure containing arguments and return values
+ *
+ * Sends a command to the SCM and waits for the command to finish processing.
+ * This should *only* be called in pre-emptible context.
+ *
+ * A note on cache maintenance:
+ * Note that any buffers that are expected to be accessed by the secure world
+ * must be flushed before invoking scm_call and invalidated in the cache
+ * immediately after scm_call returns. An important point that must be noted
+ * is that on ARMV8 architectures, invalidation actually also causes a dirty
+ * cache line to be cleaned (flushed + unset-dirty-bit). Therefore it is of
+ * paramount importance that the buffer be flushed before invoking scm_call2,
+ * even if you don't care about the contents of that buffer.
+ *
+ * Note that cache maintenance on the argument buffer (desc->args) is taken care
+ * of by scm_call2; however, callers are responsible for any other cached
+ * buffers passed over to the secure world.
+*/
 int scm_call2(u32 fn_id, struct scm_desc *desc)
 {
 	int arglen = desc->arginfo & 0xf;

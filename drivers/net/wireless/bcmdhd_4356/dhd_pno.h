@@ -86,6 +86,7 @@
 #define DHD_EPNO_STRICT_MATCH         (1 << 3)
 #define DHD_PNO_USE_SSID              (DHD_EPNO_HIDDEN_SSID | DHD_EPNO_STRICT_MATCH)
 
+/* Do not change GSCAN_BATCH_RETRIEVAL_COMPLETE */
 #define GSCAN_BATCH_RETRIEVAL_COMPLETE      0
 #define GSCAN_BATCH_RETRIEVAL_IN_PROGRESS   1
 #define GSCAN_BATCH_NO_THR_SET              101
@@ -97,18 +98,18 @@
 #define GSCAN_RETRY_THRESHOLD              3
 #define MAX_EPNO_SSID_NUM                   32
 
-#endif 
+#endif /* GSCAN_SUPPORT */
 
 enum scan_status {
-	
+	/* SCAN ABORT by other scan */
 	PNO_STATUS_ABORT,
-	
+	/* RTT is presence or not */
 	PNO_STATUS_RTT_PRESENCE,
-	
+	/* Disable PNO by Driver */
 	PNO_STATUS_DISABLE,
-	
+	/* NORMAL BATCHING GET */
 	PNO_STATUS_NORMAL,
-	
+	/* WLC_E_PFN_BEST_BATCHING */
 	PNO_STATUS_EVENT,
 	PNO_STATUS_MAX
 };
@@ -123,7 +124,7 @@ enum index_mode {
 	INDEX_OF_HOTLIST_PARAMS,
 #ifdef GSCAN_SUPPORT
 	INDEX_OF_GSCAN_PARAMS = INDEX_OF_HOTLIST_PARAMS,
-#endif 
+#endif /* GSCAN_SUPPORT */
 	INDEX_MODE_MAX
 };
 enum dhd_pno_status {
@@ -153,20 +154,24 @@ typedef enum dhd_pno_gscan_cmd_cfg {
 } dhd_pno_gscan_cmd_cfg_t;
 
 typedef enum dhd_pno_mode {
-	
+	/* Wi-Fi Legacy PNO Mode */
 	DHD_PNO_NONE_MODE   = 0,
 	DHD_PNO_LEGACY_MODE = (1 << (0)),
-	
+	/* Wi-Fi Android BATCH SCAN Mode */
 	DHD_PNO_BATCH_MODE = (1 << (1)),
-	
+	/* Wi-Fi Android Hotlist SCAN Mode */
 	DHD_PNO_HOTLIST_MODE = (1 << (2)),
-	
+	/* Wi-Fi Google Android SCAN Mode */
 	DHD_PNO_GSCAN_MODE = (1 << (3))
 } dhd_pno_mode_t;
 #define DHD_PNO_REPORT_NO_BATCH      (1 << 2)
 
 typedef struct dhd_pno_gscan_channel_bucket {
 	uint16 bucket_freq_multiple;
+	/* band = 1 All bg band channels,
+	 * band = 2 All a band channels,
+	 * band = 0 chan_list channels
+	 */
 	uint16 band;
 	uint8 report_flag;
 	uint8 num_channels;
@@ -176,9 +181,9 @@ typedef struct dhd_pno_gscan_channel_bucket {
 } dhd_pno_gscan_channel_bucket_t;
 
 
-#define DHD_PNO_AUTH_CODE_OPEN  1 
-#define DHD_PNO_AUTH_CODE_PSK   2 
-#define DHD_PNO_AUTH_CODE_EAPOL 4 
+#define DHD_PNO_AUTH_CODE_OPEN  1 /*  Open   */
+#define DHD_PNO_AUTH_CODE_PSK   2 /* WPA_PSK or WPA2PSK */
+#define DHD_PNO_AUTH_CODE_EAPOL 4 /* any EAPOL    */
 
 #define DHD_EPNO_DEFAULT_INDEX     0xFFFFFFFF
 
@@ -188,7 +193,7 @@ typedef struct dhd_epno_params {
 	int8 rssi_thresh;
 	uint8 flags;
 	uint8 auth;
-	
+	/* index required only for visble ssid */
 	uint32 index;
 	struct list_head list;
 } dhd_epno_params_t;
@@ -208,17 +213,17 @@ struct dhd_pno_swc_evt_param {
 };
 
 typedef struct wifi_gscan_result {
-    uint64 ts;                           
-    char ssid[DOT11_MAX_SSID_LEN+1];     
-    struct ether_addr	macaddr;         
-    uint32 channel;                      
-    int32 rssi;                          
-    uint64 rtt;                          
-    uint64 rtt_sd;                       
-    uint16 beacon_period;                
-    uint16 capability;		            
-    uint32 ie_length;		            
-    char  ie_data[1];					
+    uint64 ts;                           /* Time of discovery           */
+    char ssid[DOT11_MAX_SSID_LEN+1];     /* null terminated             */
+    struct ether_addr	macaddr;         /* BSSID                      */
+    uint32 channel;                      /* channel frequency in MHz    */
+    int32 rssi;                          /* in db                       */
+    uint64 rtt;                          /* in nanoseconds              */
+    uint64 rtt_sd;                       /* standard deviation in rtt   */
+    uint16 beacon_period;                /* units are Kusec             */
+    uint16 capability;		            /* Capability information       */
+    uint32 ie_length;		            /* byte length of Information Elements */
+    char  ie_data[1];					/* IE data to follow       */
 } wifi_gscan_result_t;
 
 typedef struct gscan_results_cache {
@@ -231,10 +236,10 @@ typedef struct gscan_results_cache {
 } gscan_results_cache_t;
 
 typedef struct {
-    int  id;                            
-    char realm[256];                    
-    int64_t roamingConsortiumIds[16];   
-    uint8 plmn[3];                      
+    int  id;                            /* identifier of this network block, report this in event */
+    char realm[256];                    /* null terminated UTF8 encoded realm, 0 if unspecified */
+    int64_t roamingConsortiumIds[16];   /* roaming consortium ids to match, 0s if unspecified */
+    uint8 plmn[3];                      /* mcc/mnc combination as per rules, 0s if unspecified */
 } wifi_passpoint_network;
 
 typedef struct dhd_pno_gscan_capabilities {
@@ -270,6 +275,10 @@ struct dhd_pno_gscan_params {
 	uint16 nbssid_hotlist;
 	uint16 num_epno_ssid;
 	uint8 num_visible_epno_ssid;
+	/* To keep track of visble ssid index
+	 * across multiple FW configs i.e. config
+	 * w/o clear in between
+	 */
 	uint8 ssid_ext_last_used_index;
 	struct dhd_pno_swc_evt_param param_significant;
 	struct dhd_pno_gscan_channel_bucket channel_bucket[GSCAN_MAX_CH_BUCKETS];
@@ -293,20 +302,24 @@ typedef struct gscan_batch_params {
 
 struct bssid_t {
 	struct ether_addr	macaddr;
-	int16 rssi_reporting_threshold;  
+	int16 rssi_reporting_threshold;  /* 0 -> no reporting threshold */
 };
 
 typedef struct gscan_hotlist_scan_params {
-	uint16 lost_ap_window; 
-	uint16 nbssid;   
-	struct bssid_t bssid[1];  
+	uint16 lost_ap_window; /* number of scans to declare LOST */
+	uint16 nbssid;   /* number of bssids  */
+	struct bssid_t bssid[1];  /* n bssids to follow */
 } gscan_hotlist_scan_params_t;
 
+/* SWC (Significant WiFi Change) params */
 typedef struct gscan_swc_params {
-	
+	/* Rssi averaging window size */
 	uint8 rssi_window;
+	/* Number of scans that the AP has to be absent before
+	 * being declared LOST
+	 */
 	uint8 lost_ap_window;
-	
+	/* if x  Aps have a significant change generate an event. */
 	uint8 swc_threshold;
 	uint8 nbssid;
 	wl_pfn_significant_bssid_t bssid_elem_list[1];
@@ -320,15 +333,15 @@ typedef struct dhd_pno_significant_bssid {
 } dhd_pno_significant_bssid_t;
 #else
 typedef enum dhd_pno_mode {
-	
+	/* Wi-Fi Legacy PNO Mode */
 	DHD_PNO_NONE_MODE = 0,
 	DHD_PNO_LEGACY_MODE = (1 << (0)),
-	
+	/* Wi-Fi Android BATCH SCAN Mode */
 	DHD_PNO_BATCH_MODE = (1 << (1)),
-	
+	/* Wi-Fi Android Hotlist SCAN Mode */
 	DHD_PNO_HOTLIST_MODE = (1 << (2))
 } dhd_pno_mode_t;
-#endif 
+#endif /* GSCAN_SUPPORT */
 
 struct dhd_pno_ssid {
 	uint32		SSID_len;
@@ -337,7 +350,7 @@ struct dhd_pno_ssid {
 };
 struct dhd_pno_bssid {
 	struct ether_addr	macaddr;
-	
+	/* Bit4: suppress_lost, Bit3: suppress_found */
 	uint16			flags;
 	struct list_head list;
 };
@@ -348,8 +361,8 @@ typedef struct dhd_pno_bestnet_entry {
 	int8	RSSI;
 	uint8	channel;
 	uint32	timestamp;
-	uint16	rtt0; 
-	uint16	rtt1; 
+	uint16	rtt0; /* distance_cm based on RTT */
+	uint16	rtt1; /* distance_cm based on sample standard deviation */
 	unsigned long recorded_time;
 	struct list_head list;
 } dhd_pno_bestnet_entry_t;
@@ -372,7 +385,7 @@ typedef struct dhd_pno_scan_results {
 #define SCAN_RESULTS_SIZE (sizeof(dhd_pno_scan_results_t))
 
 struct dhd_pno_get_batch_info {
-	
+	/* info related to get batch */
 	char *buf;
 	bool batch_started;
 	uint32 tot_scan_cnt;
@@ -417,20 +430,21 @@ typedef union dhd_pno_params {
 	struct dhd_pno_hotlist_params params_hotlist;
 #ifdef GSCAN_SUPPORT
 	struct dhd_pno_gscan_params params_gscan;
-#endif 
+#endif /* GSCAN_SUPPORT */
 } dhd_pno_params_t;
 typedef struct dhd_pno_status_info {
 	dhd_pub_t *dhd;
 	struct work_struct work;
 	struct mutex pno_mutex;
 	struct completion get_batch_done;
-	bool wls_supported; 
+	bool wls_supported; /* wifi location service supported or not */
 	enum dhd_pno_status pno_status;
 	enum dhd_pno_mode pno_mode;
 	dhd_pno_params_t pno_params_arr[INDEX_MODE_MAX];
 	struct list_head head_list;
 } dhd_pno_status_info_t;
 
+/* wrapper functions */
 extern int
 dhd_dev_pno_enable(struct net_device *dev, int enable);
 
@@ -455,6 +469,7 @@ extern int
 dhd_dev_pno_set_for_hotlist(struct net_device *dev, wl_pfn_bssid_t *p_pfn_bssid,
 	struct dhd_pno_hotlist_params *hotlist_params);
 
+/* dhd pno fuctions */
 extern int dhd_pno_stop_for_ssid(dhd_pub_t *dhd);
 extern int dhd_pno_enable(dhd_pub_t *dhd, int enable);
 extern int dhd_pno_set_for_ssid(dhd_pub_t *dhd, wlc_ssid_t* ssid_list, int nssid,
@@ -469,7 +484,7 @@ dhd_dev_pno_get_gscan(struct net_device *dev, dhd_pno_gscan_cmd_cfg_t type, void
         uint32 *len);
 extern void * dhd_pno_get_gscan(dhd_pub_t *dhd, dhd_pno_gscan_cmd_cfg_t type, void *info,
                        uint32 *len);
-#endif 
+#endif /* GSCAN_SUPPORT */
 
 extern int dhd_pno_stop_for_batch(dhd_pub_t *dhd);
 
@@ -492,7 +507,7 @@ extern int dhd_pno_set_add(dhd_pub_t *dhd, wl_pfn_t *netinfo, int nssid, ushort 
 	ushort slowscan_fr, uint8 pno_repeat, uint8 pno_freq_expo_max, int16 flags);
 extern int dhd_pno_enable(dhd_pub_t *dhd, int pfn_enabled);
 extern int dhd_pno_clean(dhd_pub_t *dhd);
-#endif 
-#endif 
-#endif 
-#endif 
+#endif /* #if (NDISVER >= 0x0630) */
+#endif /* #if defined(PNO_SUPPORT) */
+#endif /* #if defined(NDISVER) */
+#endif /* __DHD_PNO_H__ */

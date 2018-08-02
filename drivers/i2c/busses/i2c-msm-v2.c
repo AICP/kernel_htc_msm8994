@@ -1984,7 +1984,7 @@ static int i2c_msm_qup_post_xfer(struct i2c_msm_ctrl *ctrl, int err)
 			if (i2c_msm_qup_slv_holds_bus(ctrl))
 				qup_i2c_recover_bus_busy(ctrl);
 
-			
+			/* do not generalize error to EIO if its already set */
 			if (!err) {
 				dev_info(ctrl->dev, "Assign rc to %d\n",
 					 (-EPROTO));

@@ -460,6 +460,31 @@ config TOUCHSCREEN_HP7XX
 	  To compile this driver as a module, choose M here: the
 	  module will be called jornada720_ts.
 
+config TOUCHSCREEN_HIMAX_ES_CAP
+	tristate "HIMAX HM852xES serious i2c touchscreen"
+	depends on I2C
+	help
+	  This enables support for HIMAX HM852xES virtual key driver over I2C based touchscreens.
+
+config TOUCHSCREEN_HIMAX_DEBUG_CAP
+	tristate "HIMAX HM852xES serious debug function"
+	depends on I2C
+	help
+	  This enables HIMAX HM852xES virtual key debug function.
+
+config TOUCHSCREEN_HIMAX_ESD_EN_CAP
+	tristate "HIMAX HM852xD ESD recovery function"
+	depends on I2C
+	help
+	  This enables support ESD recovery function for HIMAX HM852xES virtual key driver.
+
+config TOUCHSCREEN_CAPSENSOR_FW_UPDATE
+        tristate "Capsensor firmware update"
+        help
+          Say Y here to support cap firmware update
+
+          If unsure, say N.
+
 config TOUCHSCREEN_HTCPEN
 	tristate "HTC Shift X9500 touchscreen"
 	depends on ISA
@@ -1050,6 +1075,7 @@ config TOUCHSCREEN_GT9XX
 source "drivers/input/touchscreen/gt9xx/Kconfig"
 
 source "drivers/input/touchscreen/synaptics_dsx_htc/Kconfig"
+source "drivers/input/touchscreen/synaptics_dsx_v2_6/Kconfig"
 
 config TOUCHSCREEN_TOUCH_FW_UPDATE
         tristate "Touchscreen firmware update"

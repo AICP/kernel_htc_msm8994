@@ -10,6 +10,9 @@
  * GNU General Public License for more details.
  */
 
+/*
+ * MSM PCIe controller driver.
+ */
 
 #include <linux/module.h>
 #include <linux/bitops.h>
@@ -190,13 +193,14 @@
 #define PCIE20_DEVICE_CONTROL_STATUS	0x78
 #define PCIE20_DEVICE_CONTROL2_STATUS2 0x98
 
+/* BRCM: correct the EP regs offset for 435x */
 #ifdef CONFIG_BCM4356
 #define PCIE20_L1SUB_CONTROL2                   0x15C
 #define PCIE20_L1SUB_CONTROL2_BRCM		0x24C
 #define PCIE20_CAP_LINKCTRLSTATUS_BRCM		0xBC
 #define PCIE20_DEVICE_CONTROL2_STATUS2_BRCM	0xD4
 #define PCIE20_LTR_MAX_SNOOP_LATENCY_BRCM	0x1B4
-#endif 
+#endif /* CONFIG_BCM4356 */
 
 #define PCIE20_ACK_F_ASPM_CTRL_REG     0x70C
 #define PCIE20_ACK_N_FTS		   0xff00
@@ -273,6 +277,7 @@
 #define PCIE20_MSI_CTRL_INTR_STATUS     (0x830)
 #define PCIE20_MSI_CTRL_MAX 8
 
+/* PM control options */
 #define PM_IRQ			 0x1
 #define PM_CLK			 0x2
 #define PM_GPIO			0x4
@@ -287,6 +292,7 @@
 #endif
 #define PCIE_LOWER_ADDR(addr) ((u32)((addr) & 0xffffffff))
 
+/* Config Space Offsets */
 #define BDF_OFFSET(bus, devfn) \
 	((bus << 24) | (devfn << 16))
 
@@ -347,6 +353,15 @@
 	} while (0)
 
 
+/* HTC_WIFI_START */
+// ** [HPKB#28650] Reduce log size on non-debug ROM
+#ifdef HTC_DEBUG_FLAG
+#define PCIE_ERR_INTERNAL        PCIE_ERR
+#else
+#define PCIE_ERR_INTERNAL        PCIE_DBG
+#endif /* HTC_DEBUG_FLAG */
+/* HTC_WIFI_END */
+
 enum msm_pcie_res {
 	MSM_PCIE_RES_PARF,
 	MSM_PCIE_RES_PHY,
@@ -386,6 +401,7 @@ enum msm_pcie_link_status {
 	MSM_PCIE_LINK_DISABLED
 };
 
+/* gpio info structure */
 struct msm_pcie_gpio_info_t {
 	char	*name;
 	uint32_t   num;
@@ -394,6 +410,7 @@ struct msm_pcie_gpio_info_t {
 	uint32_t   init;
 };
 
+/* voltage regulator info structrue */
 struct msm_pcie_vreg_info_t {
 	struct regulator  *hdl;
 	char		  *name;
@@ -403,6 +420,7 @@ struct msm_pcie_vreg_info_t {
 	bool		   required;
 };
 
+/* clock info structure */
 struct msm_pcie_clk_info_t {
 	struct clk  *hdl;
 	char	  *name;
@@ -410,17 +428,20 @@ struct msm_pcie_clk_info_t {
 	bool	  required;
 };
 
+/* resource info structure */
 struct msm_pcie_res_info_t {
 	char		*name;
 	struct resource *resource;
 	void __iomem    *base;
 };
 
+/* irq info structrue */
 struct msm_pcie_irq_info_t {
 	char		  *name;
 	uint32_t	    num;
 };
 
+/* PCIe device info structure */
 struct msm_pcie_device_info {
 	u32			bdf;
 	struct pci_dev		*dev;
@@ -430,6 +451,7 @@ struct msm_pcie_device_info {
 	u32			dev_ctrlstts_offset;
 };
 
+/* msm pcie device structure */
 struct msm_pcie_dev_t {
 	struct platform_device	 *pdev;
 	struct pci_dev *dev;
@@ -464,9 +486,9 @@ struct msm_pcie_dev_t {
 	spinlock_t			 cfg_lock;
 	unsigned long		    irqsave_flags;
 	struct mutex		     setup_lock;
-    
+    /* HTC_WIFI_START */
     struct mutex             enumerate_lock;
-    
+    /* HTC_WIFI_END */
 	struct irq_domain		*irq_domain;
 	DECLARE_BITMAP(msi_irq_in_use, PCIE_MSI_NR_IRQS);
 	uint32_t			   msi_gicm_addr;
@@ -529,10 +551,12 @@ struct msm_pcie_dev_t {
 };
 
 
+/* debug mask sys interface */
 static int msm_pcie_debug_mask;
 module_param_named(debug_mask, msm_pcie_debug_mask,
 			    int, S_IRUGO | S_IWUSR | S_IWGRP);
 
+/* debugfs values */
 static u32 rc_sel;
 static u32 rc_sel_max;
 static u32 base_sel;
@@ -541,27 +565,33 @@ static u32 wr_mask;
 static u32 wr_value;
 static ulong corr_counter_limit = 5;
 
+/* Table to track info of PCIe devices */
 static struct msm_pcie_device_info
 	msm_pcie_dev_tbl[MAX_RC_NUM * MAX_DEVICE_NUM];
 
+/* PCIe driver state */
 struct pcie_drv_sta {
 	u32 rc_num;
 	struct mutex drv_lock;
 } pcie_drv;
 
+/* msm pcie device data */
 static struct msm_pcie_dev_t msm_pcie_dev[MAX_RC_NUM];
 
+/* regulators */
 static struct msm_pcie_vreg_info_t msm_pcie_vreg_info[MSM_PCIE_MAX_VREG] = {
 	{NULL, "vreg-3.3", 0, 0, 0, false},
 	{NULL, "vreg-1.8", 1800000, 1800000, 14000, true},
 	{NULL, "vreg-0.9", 1000000, 1000000, 40000, true}
 };
 
+/* GPIOs */
 static struct msm_pcie_gpio_info_t msm_pcie_gpio_info[MSM_PCIE_MAX_GPIO] = {
 	{"perst-gpio",	0, 1, 0, 0},
 	{"wake-gpio",	 0, 0, 0, 0}
 };
 
+/* clocks */
 static struct msm_pcie_clk_info_t
 	msm_pcie_clk_info[MAX_RC_NUM][MSM_PCIE_MAX_CLK] = {
 	{
@@ -584,6 +614,7 @@ static struct msm_pcie_clk_info_t
 	}
 };
 
+/* Pipe Clocks */
 static struct msm_pcie_clk_info_t
 	msm_pcie_pipe_clk_info[MAX_RC_NUM][MSM_PCIE_MAX_PIPE_CLK] = {
 	{
@@ -594,6 +625,7 @@ static struct msm_pcie_clk_info_t
 	}
 };
 
+/* resources */
 static const struct msm_pcie_res_info_t msm_pcie_res_info[MSM_PCIE_MAX_RES] = {
 	{"parf",	0, 0},
 	{"phy",     0, 0},
@@ -604,6 +636,7 @@ static const struct msm_pcie_res_info_t msm_pcie_res_info[MSM_PCIE_MAX_RES] = {
 	{"bars",	0, 0}
 };
 
+/* irqs */
 static const struct msm_pcie_irq_info_t msm_pcie_irq_info[MSM_PCIE_MAX_IRQ] = {
 	{"int_msi",	0},
 	{"int_a",	0},
@@ -845,17 +878,17 @@ static void pcie_phy_init(struct msm_pcie_dev_t *dev)
 	msm_pcie_write_reg(dev->phy, QSERDES_COM_IP_TRIM, 0x0F);
 	msm_pcie_write_reg(dev->phy, QSERDES_COM_PLL_CNTRL, 0x46);
 
-	
+	/* CDR Settings */
 	msm_pcie_write_reg(dev->phy, QSERDES_RX_CDR_CONTROL1, 0xF4);
 	msm_pcie_write_reg(dev->phy, QSERDES_RX_CDR_CONTROL_HALF, 0x2C);
 
 	msm_pcie_write_reg(dev->phy, QSERDES_COM_PLL_VCOTAIL_EN, 0xE1);
 
-	
+	/* Calibration Settings */
 	msm_pcie_write_reg(dev->phy, QSERDES_COM_RESETSM_CNTRL, 0x91);
 	msm_pcie_write_reg(dev->phy, QSERDES_COM_RESETSM_CNTRL2, 0x07);
 
-	
+	/* Additional writes */
 	msm_pcie_write_reg(dev->phy, QSERDES_COM_RES_CODE_START_SEG1, 0x20);
 	msm_pcie_write_reg(dev->phy, QSERDES_COM_RES_CODE_CAL_CSR, 0x77);
 	msm_pcie_write_reg(dev->phy, QSERDES_COM_RES_TRIM_CONTROL, 0x15);
@@ -1161,12 +1194,12 @@ static void msm_pcie_sel_debug_testcase(struct msm_pcie_dev_t *dev,
 	u32 ep_l1sub_cap_reg1_offset = 0;
 
 	switch (testcase) {
-	case 0: 
+	case 0: /* output status */
 		pr_alert("\n\nPCIe: Status for RC%d:\n",
 			dev->rc_idx);
 		msm_pcie_show_status(dev);
 		break;
-	case 1: 
+	case 1: /* disable link */
 		pr_alert("\n\nPCIe: RC%d: disable link\n\n", dev->rc_idx);
 		ret = msm_pcie_pm_control(MSM_PCIE_SUSPEND, 1,
 			dev->dev, NULL,
@@ -1178,7 +1211,7 @@ static void msm_pcie_sel_debug_testcase(struct msm_pcie_dev_t *dev,
 			pr_alert("PCIe:%s:disabled link\n",
 				__func__);
 		break;
-	case 2: 
+	case 2: /* enable link and recover config space for RC and EP */
 		pr_alert("\n\nPCIe: RC%d: enable link and recover config space\n\n",
 			dev->rc_idx);
 		ret = msm_pcie_pm_control(MSM_PCIE_RESUME, 1,
@@ -1192,7 +1225,10 @@ static void msm_pcie_sel_debug_testcase(struct msm_pcie_dev_t *dev,
 			msm_pcie_recover_config(dev->dev);
 		}
 		break;
-	case 3: 
+	case 3: /*
+		 * disable and enable link, recover config space for
+		 * RC and EP
+		 */
 		pr_alert("\n\nPCIe: RC%d: disable and enable link then recover config space\n\n",
 			dev->rc_idx);
 		ret = msm_pcie_pm_control(MSM_PCIE_SUSPEND, 1,
@@ -1214,7 +1250,7 @@ static void msm_pcie_sel_debug_testcase(struct msm_pcie_dev_t *dev,
 			msm_pcie_recover_config(dev->dev);
 		}
 		break;
-	case 4: 
+	case 4: /* dump shadow registers for RC and EP */
 		pr_alert("\n\nPCIe: RC%d: dumping RC shadow registers\n",
 			dev->rc_idx);
 		msm_pcie_shadow_dump(dev, true);
@@ -1223,7 +1259,7 @@ static void msm_pcie_sel_debug_testcase(struct msm_pcie_dev_t *dev,
 			dev->rc_idx);
 		msm_pcie_shadow_dump(dev, false);
 		break;
-	case 5: 
+	case 5: /* disable L0s */
 		pr_alert("\n\nPCIe: RC%d: disable L0s\n\n",
 			dev->rc_idx);
 		msm_pcie_write_mask(dev->dm_core +
@@ -1247,7 +1283,7 @@ static void msm_pcie_sel_debug_testcase(struct msm_pcie_dev_t *dev,
 			readl_relaxed(dev->conf +
 			PCIE20_CAP_LINKCTRLSTATUS));
 		break;
-	case 6: 
+	case 6: /* enable L0s */
 		pr_alert("\n\nPCIe: RC%d: enable L0s\n\n",
 			dev->rc_idx);
 		msm_pcie_write_mask(dev->dm_core +
@@ -1271,7 +1307,7 @@ static void msm_pcie_sel_debug_testcase(struct msm_pcie_dev_t *dev,
 			readl_relaxed(dev->conf +
 			PCIE20_CAP_LINKCTRLSTATUS));
 		break;
-	case 7: 
+	case 7: /* disable L1 */
 		pr_alert("\n\nPCIe: RC%d: disable L1\n\n",
 			dev->rc_idx);
 		msm_pcie_write_mask(dev->dm_core +
@@ -1295,7 +1331,7 @@ static void msm_pcie_sel_debug_testcase(struct msm_pcie_dev_t *dev,
 			readl_relaxed(dev->conf +
 			PCIE20_CAP_LINKCTRLSTATUS));
 		break;
-	case 8: 
+	case 8: /* enable L1 */
 		pr_alert("\n\nPCIe: RC%d: enable L1\n\n",
 			dev->rc_idx);
 		msm_pcie_write_mask(dev->dm_core +
@@ -1319,7 +1355,7 @@ static void msm_pcie_sel_debug_testcase(struct msm_pcie_dev_t *dev,
 			readl_relaxed(dev->conf +
 			PCIE20_CAP_LINKCTRLSTATUS));
 		break;
-	case 9: 
+	case 9: /* disable L1ss */
 		pr_alert("\n\nPCIe: RC%d: disable L1ss\n\n",
 			dev->rc_idx);
 		current_offset = PCIE_EXT_CAP_OFFSET;
@@ -1380,7 +1416,7 @@ static void msm_pcie_sel_debug_testcase(struct msm_pcie_dev_t *dev,
 			readl_relaxed(dev->conf +
 			PCIE20_DEVICE_CONTROL2_STATUS2));
 		break;
-	case 10: 
+	case 10: /* enable L1ss */
 		pr_alert("\n\nPCIe: RC%d: enable L1ss\n\n",
 			dev->rc_idx);
 		current_offset = PCIE_EXT_CAP_OFFSET;
@@ -1450,7 +1486,7 @@ static void msm_pcie_sel_debug_testcase(struct msm_pcie_dev_t *dev,
 			readl_relaxed(dev->conf +
 			PCIE20_DEVICE_CONTROL2_STATUS2));
 		break;
-	case 11: 
+	case 11: /* enumerate PCIe  */
 		pr_alert("\n\nPCIe: attempting to enumerate RC%d\n\n",
 			dev->rc_idx);
 		if (dev->enumerated)
@@ -1465,7 +1501,7 @@ static void msm_pcie_sel_debug_testcase(struct msm_pcie_dev_t *dev,
 					dev->rc_idx);
 		}
 		break;
-	case 12: 
+	case 12: /* write a value to a register */
 		pr_alert("\n\nPCIe: RC%d: writing a value to a register\n\n",
 			dev->rc_idx);
 
@@ -1483,7 +1519,7 @@ static void msm_pcie_sel_debug_testcase(struct msm_pcie_dev_t *dev,
 			wr_offset, wr_mask, wr_value);
 
 		break;
-	case 13: 
+	case 13: /* dump all registers of base_sel */
 		if (!base_sel) {
 			pr_alert("Invalid base_sel: 0x%x\n", base_sel);
 			break;
@@ -1918,6 +1954,16 @@ static inline int msm_pcie_is_link_up(struct msm_pcie_dev_t *dev)
 			PCIE20_CAP_LINKCTRLSTATUS) & BIT(29);
 }
 
+/**
+ * msm_pcie_iatu_config - configure outbound address translation region
+ * @dev: root commpex
+ * @nr: region number
+ * @type: target transaction type, see PCIE20_CTRL1_TYPE_xxx
+ * @host_addr: - region start address on host
+ * @host_end: - region end address (low 32 bit) on host,
+ *	upper 32 bits are same as for @host_addr
+ * @target_addr: - region start address on target
+ */
 static void msm_pcie_iatu_config(struct msm_pcie_dev_t *dev, int nr, u8 type,
 				unsigned long host_addr, u32 host_end,
 				unsigned long target_addr)
@@ -1943,14 +1989,14 @@ static void msm_pcie_iatu_config(struct msm_pcie_dev_t *dev, int nr, u8 type,
 			BIT(31);
 	}
 
-	
+	/* select region */
 	writel_relaxed(nr, pcie20 + PCIE20_PLR_IATU_VIEWPORT);
-	
+	/* ensure that hardware locks it */
 	wmb();
 
-	
+	/* switch off region before changing it */
 	writel_relaxed(0, pcie20 + PCIE20_PLR_IATU_CTRL2);
-	
+	/* and wait till it propagates to the hardware */
 	wmb();
 
 	writel_relaxed(type, pcie20 + PCIE20_PLR_IATU_CTRL1);
@@ -1966,7 +2012,7 @@ static void msm_pcie_iatu_config(struct msm_pcie_dev_t *dev, int nr, u8 type,
 	wmb();
 	writel_relaxed(BIT(31), pcie20 + PCIE20_PLR_IATU_CTRL2);
 
-	
+	/* ensure that changes propagated to the hardware */
 	wmb();
 
 	if (dev->enumerated) {
@@ -1993,6 +2039,16 @@ static void msm_pcie_iatu_config(struct msm_pcie_dev_t *dev, int nr, u8 type,
 	}
 }
 
+/**
+ * msm_pcie_cfg_bdf - configure for config access
+ * @dev: root commpex
+ * @bus: PCI bus number
+ * @devfn: PCI dev and function number
+ *
+ * Remap if required region 0 for config access of proper type
+ * (CFG0 for bus 1, CFG1 for other buses)
+ * Cache current device bdf for speed-up
+ */
 static void msm_pcie_cfg_bdf(struct msm_pcie_dev_t *dev, u8 bus, u8 devfn)
 {
 	struct resource *axi_conf = dev->res[MSM_PCIE_RES_CONF].resource;
@@ -2036,8 +2092,11 @@ static inline void msm_pcie_save_shadow(struct msm_pcie_dev_t *dev,
 	}
 }
 
+/* HTC_WIFI_START */
+// ** workaround for DPM timeout
 static void msm_pcie_notify_client(struct msm_pcie_dev_t *dev, enum msm_pcie_event event);
 int oper_conf_fail_cnt = 0;
+/* HTC_WIFI_END */
 
 static inline int msm_pcie_oper_conf(struct pci_bus *bus, u32 devfn, int oper,
 				     int where, int size, u32 *val)
@@ -2093,7 +2152,7 @@ static inline int msm_pcie_oper_conf(struct pci_bus *bus, u32 devfn, int oper,
 		goto unlock;
 	}
 
-	
+	/* check if the link is up for endpoint */
 	if (!rc && !msm_pcie_is_link_up(dev)) {
 		PCIE_ERR(dev,
 			"PCIe: RC%d %s fail, link down - bus %d devfn %d\n",
@@ -2144,6 +2203,9 @@ static inline int msm_pcie_oper_conf(struct pci_bus *bus, u32 devfn, int oper,
 		writel_relaxed(wr_val, config_base + word_offset);
 		wmb(); /* ensure config data is written to hardware register */
 
+/* HTC_WIFI_START */
+// ** workaround for DPM timeout
+// ** remove origincal code
 #if 0
 		if (rd_val == PCIE_LINK_DOWN)
 			PCIE_ERR(dev,
@@ -2152,6 +2214,7 @@ static inline int msm_pcie_oper_conf(struct pci_bus *bus, u32 devfn, int oper,
 		else if (dev->shadow_en)
 			msm_pcie_save_shadow(dev, word_offset, wr_val, bdf, rc);
 #endif
+// ** add new code
 		if (rd_val == PCIE_LINK_DOWN) {
 			PCIE_ERR(dev,
 				"Read of RC%d %d:0x%02x + 0x%04x[%d] is all FFs\n",
@@ -2173,6 +2236,7 @@ static inline int msm_pcie_oper_conf(struct pci_bus *bus, u32 devfn, int oper,
 		} else {
 			oper_conf_fail_cnt = 0;
 		}
+/* HTC_WIFI_END */
 
 		PCIE_DBG3(dev,
 			"RC%d %d:0x%02x + 0x%04x[%d] <- 0x%08x; rd 0x%08x val 0x%08x\n",
@@ -2210,6 +2274,8 @@ static struct pci_ops msm_pcie_ops = {
 	.write = msm_pcie_wr_conf,
 };
 
+/* HTC_WIFI_START */
+//** Read vender ID in configuration space to check the pcie state
 void msm_pcie_detect_conf(struct pci_dev *dev) {
 	struct msm_pcie_dev_t *pcie_dev;
 	u32 ids, vendor_id, device_id;
@@ -2234,6 +2300,7 @@ void msm_pcie_detect_conf(struct pci_dev *dev) {
 	}
 }
 EXPORT_SYMBOL(msm_pcie_detect_conf);
+/* HTC_WIFI_END */
 
 static int msm_pcie_gpio_init(struct msm_pcie_dev_t *dev)
 {
@@ -2545,14 +2612,19 @@ static void msm_pcie_config_controller(struct msm_pcie_dev_t *dev)
 {
 	PCIE_DBG(dev, "RC%d\n", dev->rc_idx);
 
+	/*
+	 * program and enable address translation region 0 (device config
+	 * address space); region type config;
+	 * axi config address range to device config address range
+	 */
 	if (dev->enumerated) {
 		msm_pcie_iatu_config_all_ep(dev);
 	} else {
-		dev->current_bdf = 0; 
+		dev->current_bdf = 0; /* to force IATU re-config */
 		msm_pcie_cfg_bdf(dev, 1, 0);
 	}
 
-	
+	/* configure N_FTS */
 	PCIE_DBG2(dev, "Original PCIE20_ACK_F_ASPM_CTRL_REG:0x%x\n",
 		readl_relaxed(dev->dm_core + PCIE20_ACK_F_ASPM_CTRL_REG));
 	if (!dev->n_fts)
@@ -2571,7 +2643,7 @@ static void msm_pcie_config_controller(struct msm_pcie_dev_t *dev)
 	PCIE_DBG2(dev, "Updated PCIE20_ACK_F_ASPM_CTRL_REG:0x%x\n",
 		readl_relaxed(dev->dm_core + PCIE20_ACK_F_ASPM_CTRL_REG));
 
-	
+	/* Enable AER on RC */
 	msm_pcie_write_mask(dev->dm_core + PCIE20_BRIDGE_CTRL, 0,
 					BIT(16)|BIT(17));
 	msm_pcie_write_mask(dev->dm_core +  PCIE20_CAP_DEVCTRLSTATUS, 0,
@@ -2588,18 +2660,18 @@ static void msm_pcie_config_link_state(struct msm_pcie_dev_t *dev)
 	u32 ep_l1sub_ctrl1_offset = 0;
 	u32 ep_l1sub_cap_reg1_offset = 0;
 
-	
+	/* Enable the AUX Clock and the Core Clk to be synchronous for L1SS*/
 	if (!dev->aux_clk_sync && dev->l1ss_supported)
 		msm_pcie_write_mask(dev->parf +
 				PCIE20_PARF_SYS_CTRL, BIT(3), 0);
 
 	if (dev->l0s_supported) {
-		
+		/* config RC */
 		msm_pcie_write_mask(dev->dm_core + PCIE20_CAP_LINKCTRLSTATUS,
 					0, BIT(0));
 #ifdef CONFIG_BCM4356
 		if (dev->rc_idx == 1) {
-			
+			/* config EP */
 			msm_pcie_write_mask(dev->conf + PCIE20_CAP_LINKCTRLSTATUS_BRCM,
 				0, BIT(0));
 			PCIE_DBG2(dev, "RC's CAP_LINKCTRLSTATUS:0x%x\n",
@@ -2608,26 +2680,26 @@ static void msm_pcie_config_link_state(struct msm_pcie_dev_t *dev)
 			PCIE_DBG2(dev, "EP's CAP_LINKCTRLSTATUS:0x%x\n",
 				readl_relaxed(dev->conf + PCIE20_CAP_LINKCTRLSTATUS_BRCM));
 			if (dev->shadow_en) {
-				
+				/* config RC */
 				dev->rc_shadow[PCIE20_CAP_LINKCTRLSTATUS / 4] =
 					readl_relaxed(dev->dm_core +
 						PCIE20_CAP_LINKCTRLSTATUS);
-				
+				/* config EP */
 				dev->ep_shadow[0][PCIE20_CAP_LINKCTRLSTATUS_BRCM / 4] =
 					readl_relaxed(dev->conf +
 						PCIE20_CAP_LINKCTRLSTATUS_BRCM);
 			}
 		} else {
-#endif 
-			
+#endif /* CONFIG_BCM4356 */
+			/* config EP */
 			msm_pcie_write_mask(dev->conf + PCIE20_CAP_LINKCTRLSTATUS,
 				0, BIT(0));
 			if (dev->shadow_en) {
-				
+				/* config RC */
 				dev->rc_shadow[PCIE20_CAP_LINKCTRLSTATUS / 4] =
 					readl_relaxed(dev->dm_core +
 						PCIE20_CAP_LINKCTRLSTATUS);
-				
+				/* config EP */
 				dev->ep_shadow[0][PCIE20_CAP_LINKCTRLSTATUS / 4] =
 					readl_relaxed(dev->conf +
 						PCIE20_CAP_LINKCTRLSTATUS);
@@ -2639,16 +2711,16 @@ static void msm_pcie_config_link_state(struct msm_pcie_dev_t *dev)
 				readl_relaxed(dev->conf + PCIE20_CAP_LINKCTRLSTATUS));
 #ifdef CONFIG_BCM4356
 		}
-#endif 
+#endif /* CONFIG_BCM4356 */
 	}
 
 	if (dev->l1_supported) {
-		
+		/* config RC */
 		msm_pcie_write_mask(dev->dm_core + PCIE20_CAP_LINKCTRLSTATUS,
 			0, BIT(1));
 #ifdef CONFIG_BCM4356
 		if (dev->rc_idx == 1) {
-			
+			/* config EP */
 			msm_pcie_write_mask(dev->conf + PCIE20_CAP_LINKCTRLSTATUS_BRCM,
 				0, BIT(1));
 			PCIE_DBG2(dev, "RC's CAP_LINKCTRLSTATUS:0x%x\n",
@@ -2657,26 +2729,26 @@ static void msm_pcie_config_link_state(struct msm_pcie_dev_t *dev)
 			PCIE_DBG2(dev, "EP's CAP_LINKCTRLSTATUS:0x%x\n",
 				readl_relaxed(dev->conf + PCIE20_CAP_LINKCTRLSTATUS_BRCM));
 			if (dev->shadow_en) {
-				
+				/* config RC */
 				dev->rc_shadow[PCIE20_CAP_LINKCTRLSTATUS / 4] =
 					readl_relaxed(dev->dm_core +
 						PCIE20_CAP_LINKCTRLSTATUS);
-				
+				/* config EP */
 				dev->ep_shadow[0][PCIE20_CAP_LINKCTRLSTATUS_BRCM / 4] =
 					readl_relaxed(dev->conf +
 						PCIE20_CAP_LINKCTRLSTATUS_BRCM);
 			}
 		} else {
-#endif 
-			
+#endif /* CONFIG_BCM4356 */
+			/* config EP */
 			msm_pcie_write_mask(dev->conf + PCIE20_CAP_LINKCTRLSTATUS,
 				0, BIT(1));
 			if (dev->shadow_en) {
-				
+				/* config RC */
 				dev->rc_shadow[PCIE20_CAP_LINKCTRLSTATUS / 4] =
 					readl_relaxed(dev->dm_core +
 						PCIE20_CAP_LINKCTRLSTATUS);
-				
+				/* config EP */
 				dev->ep_shadow[0][PCIE20_CAP_LINKCTRLSTATUS / 4] =
 					readl_relaxed(dev->conf +
 						PCIE20_CAP_LINKCTRLSTATUS);
@@ -2688,18 +2760,18 @@ static void msm_pcie_config_link_state(struct msm_pcie_dev_t *dev)
 				readl_relaxed(dev->conf + PCIE20_CAP_LINKCTRLSTATUS));
 #ifdef CONFIG_BCM4356
 		}
-#endif 
+#endif /* CONFIG_BCM4356 */
 	}
 
 	if (dev->l1ss_supported) {
 		current_offset = PCIE_EXT_CAP_OFFSET;
 		while (current_offset) {
-			
+			/* HTC_WIFI_STARt */
 			if (current_offset == 0xffff) {
 				PCIE_ERR(dev, "Incorrect current_offset 0x%x\n", current_offset);
 				return;
 			}
-			
+			/* HTC_WIFI_END */
 			val = readl_relaxed(dev->conf + current_offset);
 			if ((val & 0xffff) == L1SUB_CAP_ID) {
 				ep_l1sub_cap_reg1_offset = current_offset + 0x4;
@@ -2725,57 +2797,57 @@ static void msm_pcie_config_link_state(struct msm_pcie_dev_t *dev)
 
 #ifdef CONFIG_BCM4356
 		if (dev->rc_idx == 1) {
-			
+			/* EP: disable ASPM(0xbc) */
 			msm_pcie_write_mask(dev->conf + PCIE20_CAP_LINKCTRLSTATUS_BRCM,
 				BIT(1)|BIT(0), 0);
-			
+			/* EP: disable L1SS */
 			msm_pcie_write_mask(dev->conf + ep_l1sub_ctrl1_offset,
 				BIT(3)|BIT(2)|BIT(1)|BIT(0), 0);
-			
+			/* RC: disable ASPM  */
 			msm_pcie_write_mask(dev->dm_core + PCIE20_CAP_LINKCTRLSTATUS,
 				BIT(1)|BIT(0), 0);
-			
+			/* RC: disable L1SS */
 			msm_pcie_write_mask(dev->dm_core + PCIE20_L1SUB_CONTROL1,
 				BIT(3)|BIT(2)|BIT(1)|BIT(0), 0);
 
-			
-			
+			/* EP: Set L1ss control 2 register(0x24c) */
+			/* TPOWERON : 120us */
 			msm_pcie_write_mask(dev->conf + PCIE20_L1SUB_CONTROL2_BRCM,
 				0xFF, BIT(6)|BIT(5)|BIT(0));
-			
+			/* RC: TPOWERON : 120us */
 			msm_pcie_write_mask(dev->dm_core + PCIE20_L1SUB_CONTROL2,
 				0xFF, BIT(6)|BIT(5)|BIT(0));
 
-			
-			
+			/* EP: Set L1ss control 1 register(0x248) - Enable L1ss */
+			/* L12Threshold : 164 us */
 			msm_pcie_write_mask(dev->conf + ep_l1sub_ctrl1_offset, 0,
 				BIT(30)|BIT(23)|BIT(21)|BIT(3)|BIT(2)|BIT(1)|BIT(0));
-			
+			/* RC: Set L1SS and L12Threshold : 164 us , Enable L1ss */
 			msm_pcie_write_mask(dev->dm_core + PCIE20_L1SUB_CONTROL1, 0,
 				BIT(30)|BIT(23)|BIT(21)|BIT(3)|BIT(2)|BIT(1)|BIT(0));
 
 			if (dev->l0s_supported) {
-				
+				/* EP: Set ASPM(0xbc): supported ASPM L0s and L1 */
 				msm_pcie_write_mask(dev->conf + PCIE20_CAP_LINKCTRLSTATUS_BRCM, 0,
 					BIT(8)|BIT(6)|BIT(1)|BIT(0));
-				
+				/* RC: Set ASPM and ComClkConfig(0x80): supported ASPM L0s and L1 */
 				msm_pcie_write_mask(dev->dm_core + PCIE20_CAP_LINKCTRLSTATUS, 0,
 					BIT(6)|BIT(1)|BIT(0));
 			} else {
-				
+				/* EP: Set ASPM(0xbc): supported ASPM L1 */
 				msm_pcie_write_mask(dev->conf + PCIE20_CAP_LINKCTRLSTATUS_BRCM, 0,
 					BIT(8)|BIT(6)|BIT(1));
-				
+				/* RC: Set ASPM and ComClkConfig(0x80): supported ASPM L1 */
 				msm_pcie_write_mask(dev->dm_core + PCIE20_CAP_LINKCTRLSTATUS, 0,
 					BIT(6)|BIT(1));
 			}
 
-			
+			/* EP: Set LTR Latency (0x1B4) */
 			msm_pcie_write_mask(dev->conf + PCIE20_LTR_MAX_SNOOP_LATENCY_BRCM, 0,
 				BIT(28)|BIT(17)|BIT(16)|BIT(12)|BIT(1)|BIT(0));
-			
+			/* RC: Toogle LTR Enable (0x98) */
 			msm_pcie_write_mask(dev->dm_core + PCIE20_DEVICE_CONTROL2_STATUS2, 0, BIT(10));
-			
+			/* EP: Toggle LTR Enable(0xd4) */
 			msm_pcie_write_mask(dev->conf + PCIE20_DEVICE_CONTROL2_STATUS2_BRCM, 0, BIT(10));
 
 			PCIE_DBG2(dev, "RC's L1SUB_CONTROL1:0x%x\n",
@@ -2802,6 +2874,7 @@ static void msm_pcie_config_link_state(struct msm_pcie_dev_t *dev)
 				readl_relaxed(dev->conf +
 					PCIE20_LTR_MAX_SNOOP_LATENCY_BRCM));
 			if (dev->shadow_en) {
+//DM Core
 				dev->rc_shadow[PCIE20_L1SUB_CONTROL1 / 4] =
 					readl_relaxed(dev->dm_core +
 						PCIE20_L1SUB_CONTROL1);
@@ -2814,6 +2887,7 @@ static void msm_pcie_config_link_state(struct msm_pcie_dev_t *dev)
 				dev->rc_shadow[PCIE20_L1SUB_CONTROL2 / 4] =
 					readl_relaxed(dev->dm_core +
 						PCIE20_L1SUB_CONTROL2);
+//Conf
 				dev->ep_shadow[0][ep_l1sub_ctrl1_offset / 4] =
 					readl_relaxed(dev->conf +
 						ep_l1sub_ctrl1_offset);
@@ -2831,22 +2905,22 @@ static void msm_pcie_config_link_state(struct msm_pcie_dev_t *dev)
 						PCIE20_LTR_MAX_SNOOP_LATENCY_BRCM);
 			}
 		} else {
-#endif 
-			
+#endif /* CONFIG_BCM4356 */
+			/* config RC */
 			msm_pcie_write_reg_field(dev->dm_core, PCIE20_L1SUB_CONTROL1,
 				0xf, val);
 			msm_pcie_write_mask(dev->dm_core +
 				PCIE20_DEVICE_CONTROL2_STATUS2,
 				0, BIT(10));
-			
+			/* config EP */
 			msm_pcie_write_reg_field(dev->conf, ep_l1sub_ctrl1_offset,
 				0xf, val);
 			msm_pcie_write_mask(dev->conf + PCIE20_DEVICE_CONTROL2_STATUS2,
 				0, BIT(10));
-			
+			/* config RC */
 			msm_pcie_write_mask(dev->dm_core + PCIE20_CAP_LINKCTRLSTATUS,
 				0, BIT(6)|BIT(1)|BIT(0));
-			
+			/* config EP */
 			msm_pcie_write_mask(dev->conf + PCIE20_CAP_LINKCTRLSTATUS,
 				0, BIT(8)|BIT(6)|BIT(1)|BIT(0));
 
@@ -2888,7 +2962,7 @@ static void msm_pcie_config_link_state(struct msm_pcie_dev_t *dev)
 					PCIE20_CAP_LINKCTRLSTATUS));
 #ifdef CONFIG_BCM4356
 		}
-#endif 
+#endif /* CONFIG_BCM4356 */
 	}
 }
 
@@ -2898,7 +2972,7 @@ void msm_pcie_config_msi_controller(struct msm_pcie_dev_t *dev)
 
 	PCIE_DBG(dev, "RC%d\n", dev->rc_idx);
 
-	
+	/* program MSI controller and enable all interrupts */
 	writel_relaxed(MSM_PCIE_MSI_PHY, dev->dm_core + PCIE20_MSI_CTRL_ADDR);
 	writel_relaxed(0, dev->dm_core + PCIE20_MSI_CTRL_UPPER_ADDR);
 
@@ -2906,7 +2980,7 @@ void msm_pcie_config_msi_controller(struct msm_pcie_dev_t *dev)
 		writel_relaxed(~0, dev->dm_core +
 			       PCIE20_MSI_CTRL_INTR_EN + (i * 12));
 
-	
+	/* ensure that hardware is configured before proceeding */
 	wmb();
 }
 
@@ -3137,7 +3211,7 @@ static int msm_pcie_get_resources(struct msm_pcie_dev_t *dev,
 		}
 	}
 
-	
+	/* All allocations succeeded */
 
 	dev->wake_n = gpio_to_irq(dev->gpio[MSM_PCIE_GPIO_WAKE].num);
 
@@ -3179,7 +3253,7 @@ int msm_pcie_enable(struct msm_pcie_dev_t *dev, u32 options)
 	if (dev->rc_idx == 1) {
 		PCIE_ERR(dev, "RC%d %s\n", dev->rc_idx, __FUNCTION__);
 	}
-#endif 
+#endif /* CONFIG_BCM4356 */
 
 	mutex_lock(&dev->setup_lock);
 
@@ -3189,7 +3263,7 @@ int msm_pcie_enable(struct msm_pcie_dev_t *dev, u32 options)
 		goto out;
 	}
 
-	
+	/* assert PCIe reset link to keep EP in reset */
 
 	PCIE_INFO(dev, "PCIe: Assert the reset of endpoint of RC%d.\n",
 		dev->rc_idx);
@@ -3199,7 +3273,7 @@ int msm_pcie_enable(struct msm_pcie_dev_t *dev, u32 options)
 	usleep_range(PERST_PROPAGATION_DELAY_US_MIN,
 				 PERST_PROPAGATION_DELAY_US_MAX);
 
-	
+	/* enable power */
 
 	if (options & PM_VREG) {
 		ret = msm_pcie_vreg_init(dev);
@@ -3207,7 +3281,7 @@ int msm_pcie_enable(struct msm_pcie_dev_t *dev, u32 options)
 			goto out;
 	}
 
-	
+	/* enable clocks */
 	if (options & PM_CLK) {
 		ret = msm_pcie_clk_init(dev);
 		wmb();
@@ -3220,10 +3294,10 @@ int msm_pcie_enable(struct msm_pcie_dev_t *dev, u32 options)
 		msm_pcie_restore_sec_config(dev);
 	}
 
-	
+	/* enable PCIe clocks and resets */
 	msm_pcie_write_mask(dev->parf + PCIE20_PARF_PHY_CTRL, BIT(0), 0);
 
-	
+	/* change DBI base address */
 	writel_relaxed(0, dev->parf + PCIE20_PARF_DBI_BASE_ADDR);
 
 	writel_relaxed(0x365E, dev->parf + PCIE20_PARF_SYS_CTRL);
@@ -3238,13 +3312,13 @@ int msm_pcie_enable(struct msm_pcie_dev_t *dev, u32 options)
 			PCIE20_PARF_AXI_MSTR_WR_ADDR_HALT, 0, BIT(31));
 	}
 
-	
+	/* init PCIe PHY */
 	pcie_phy_init(dev);
 
 	if (options & PM_PIPE_CLK) {
 		usleep_range(PHY_STABILIZATION_DELAY_US_MIN,
 					 PHY_STABILIZATION_DELAY_US_MAX);
-		
+		/* Enable the pipe clock */
 		ret = msm_pcie_pipe_clk_init(dev);
 		wmb();
 		if (ret)
@@ -3277,7 +3351,7 @@ int msm_pcie_enable(struct msm_pcie_dev_t *dev, u32 options)
 	if (dev->ep_latency)
 		usleep_range(dev->ep_latency * 1000, dev->ep_latency * 1000);
 
-	
+	/* de-assert PCIe reset link to bring EP out of reset */
 
 	PCIE_INFO(dev, "PCIe: Release the reset of endpoint of RC%d.\n",
 		dev->rc_idx);
@@ -3286,16 +3360,16 @@ int msm_pcie_enable(struct msm_pcie_dev_t *dev, u32 options)
 	usleep_range(PERST_PROPAGATION_DELAY_US_MIN,
 				 PERST_PROPAGATION_DELAY_US_MAX);
 
-	
+	/* set max tlp read size */
 	msm_pcie_write_reg_field(dev->dm_core, PCIE20_DEVICE_CONTROL_STATUS,
 				0x7000, dev->tlp_rd_size);
 
-	
+	/* enable link training */
 	msm_pcie_write_mask(dev->parf + PCIE20_PARF_LTSSM, 0, BIT(8));
 
 	PCIE_DBG(dev, "%s", "check if link is up\n");
 
-	
+	/* Wait for up to 100ms for the link to come up */
 	do {
 		usleep_range(LINK_UP_TIMEOUT_US_MIN, LINK_UP_TIMEOUT_US_MAX);
 		val =  readl_relaxed(dev->elbi + PCIE20_ELBI_SYS_STTS);
@@ -3307,7 +3381,14 @@ int msm_pcie_enable(struct msm_pcie_dev_t *dev, u32 options)
 		msm_pcie_confirm_linkup(dev, false, false)) {
 		PCIE_DBG(dev, "Link is up after %d checkings\n",
 			link_check_count);
+		/* HTC_WIFI_START */
+		// ** [HPKB#28650] Reduce log size on non-debug ROM
+#if 0
 		PCIE_INFO(dev, "PCIe RC%d link initialized\n", dev->rc_idx);
+#else
+		PCIE_ERR_INTERNAL(dev, "PCIe RC%d link initialized\n", dev->rc_idx);
+#endif
+		/* HTC_WIFI_END */
 	} else {
 		PCIE_INFO(dev, "PCIe: Assert the reset of endpoint of RC%d.\n",
 			dev->rc_idx);
@@ -3350,9 +3431,16 @@ void msm_pcie_disable(struct msm_pcie_dev_t *dev, u32 options)
 	PCIE_DBG(dev, "RC%d\n", dev->rc_idx);
 #ifdef CONFIG_BCM4356
 	if (dev->rc_idx == 1) {
+/* HTC_WIFI_START */
+// ** [HPKB#28650] Reduce log size on non-debug ROM
+#if 0
 		PCIE_ERR(dev, "RC%d %s\n", dev->rc_idx, __FUNCTION__);
+#else
+		PCIE_ERR_INTERNAL(dev, "RC%d %s\n", dev->rc_idx, __FUNCTION__);
+#endif
+/* HTC_WIFI_END */
 	}
-#endif 
+#endif /* CONFIG_BCM4356 */
 
 	mutex_lock(&dev->setup_lock);
 
@@ -3368,8 +3456,16 @@ void msm_pcie_disable(struct msm_pcie_dev_t *dev, u32 options)
 	dev->power_on = false;
 	dev->link_turned_off_counter++;
 
+/* HTC_WIFI_START */
+// ** [HPKB#28650] Reduce log size on non-debug ROM
+#if 0
 	PCIE_INFO(dev, "PCIe: Assert the reset of endpoint of RC%d.\n",
 		dev->rc_idx);
+#else
+	PCIE_ERR_INTERNAL(dev, "PCIe: Assert the reset of endpoint of RC%d.\n",
+		dev->rc_idx);
+#endif
+/* HTC_WIFI_END */
 
 	gpio_set_value(dev->gpio[MSM_PCIE_GPIO_PERST].num,
 				dev->gpio[MSM_PCIE_GPIO_PERST].on);
@@ -3398,6 +3494,10 @@ static int msm_pcie_setup(int nr, struct pci_sys_data *sys)
 			(struct msm_pcie_dev_t *)(sys->private_data);
 
 	PCIE_DBG(dev, "bus %d\n", nr);
+	/*
+	 * specify linux PCI framework to allocate device memory (BARs)
+	 * from msm_pcie_dev.dev_mem_res resource.
+	 */
 	sys->mem_offset = 0;
 	sys->io_offset = 0;
 
@@ -3498,7 +3598,7 @@ static void msm_pcie_config_ep_aer(struct msm_pcie_dev_t *dev,
 	PCIE_DBG2(dev, "RC%d: EP dev_ctrlstts_offset: 0x%x\n",
 		dev->rc_idx, ep_dev_info->dev_ctrlstts_offset);
 
-	
+	/* Enable AER on EP */
 	msm_pcie_write_mask(ep_base + ep_dev_info->dev_ctrlstts_offset, 0,
 				BIT(3)|BIT(2)|BIT(1)|BIT(0));
 
@@ -3623,14 +3723,14 @@ int msm_pcie_enumerate(u32 rc_idx)
 		return -EPROBE_DEFER;
 	}
 
-    
+    /* HTC_WIFI_START */
     mutex_lock(&dev->enumerate_lock);
-    
+    /* HTC_WIFI_END */
 
 	if (!dev->enumerated) {
 		ret = msm_pcie_enable(dev, PM_ALL);
 
-		
+		/* kick start ARM PCI configuration framework */
 		if (!ret) {
 			struct pci_dev *pcidev = NULL;
 			bool found = false;
@@ -3643,7 +3743,7 @@ int msm_pcie_enumerate(u32 rc_idx)
 
 			msm_pci[rc_idx].private_data = (void **)&dev;
 			pci_common_init(&msm_pci[rc_idx]);
-			
+			/* This has to happen only once */
 			dev->enumerated = true;
 
 			msm_pcie_write_mask(dev->dm_core +
@@ -3675,9 +3775,9 @@ int msm_pcie_enumerate(u32 rc_idx)
 				PCIE_ERR(dev,
 					"PCIe: Did not find PCI device for RC%d.\n",
 					dev->rc_idx);
-                
+                /* HTC_WIFI_START */
                 mutex_unlock(&dev->enumerate_lock);
-                
+                /* HTC_WIFI_END */
 				return -ENODEV;
 			}
 
@@ -3688,9 +3788,9 @@ int msm_pcie_enumerate(u32 rc_idx)
 				PCIE_ERR(dev,
 					"PCIe: Failed to set up device table for RC%d\n",
 					dev->rc_idx);
-                
+                /* HTC_WIFI_START */
                 mutex_unlock(&dev->enumerate_lock);
-                
+                /* HTC_WIFI_END */
 				return -ENODEV;
 			}
 		} else {
@@ -3702,9 +3802,9 @@ int msm_pcie_enumerate(u32 rc_idx)
 			dev->rc_idx);
 	}
 
-    
+    /* HTC_WIFI_START */
     mutex_unlock(&dev->enumerate_lock);
-    
+    /* HTC_WIFI_END */
 
 	return ret;
 }
@@ -3916,7 +4016,7 @@ static irqreturn_t handle_aer_irq(int irq, void *data)
 					PCIE20_AER_CORR_ERR_STATUS_REG,
 					0x31c1, 0x31c1);
 		} else {
-#endif 
+#endif /* CONFIG_BCM4356 */
 			msm_pcie_write_reg_field(ep_base,
 					PCIE20_AER_UNCORR_ERR_STATUS_REG,
 					0x3fff031, 0x3fff031);
@@ -3925,7 +4025,7 @@ static irqreturn_t handle_aer_irq(int irq, void *data)
 					0xf1c1, 0xf1c1);
 #ifdef CONFIG_BCM4356
 		}
-#endif 
+#endif /* CONFIG_BCM4356 */
 	}
 out:
 	if (((dev->rc_corr_counter < corr_counter_limit) &&
@@ -4009,7 +4109,7 @@ static irqreturn_t handle_linkdown_irq(int irq, void *data)
 		pcie_phy_dump(dev);
 		pcie_parf_dump(dev);
 
-		
+		/* assert PERST */
 		gpio_set_value(dev->gpio[MSM_PCIE_GPIO_PERST].num,
 				dev->gpio[MSM_PCIE_GPIO_PERST].on);
 		PCIE_ERR(dev, "PCIe link is down for RC%d\n", dev->rc_idx);
@@ -4030,6 +4130,8 @@ static irqreturn_t handle_msi_irq(int irq, void *data)
 
 	PCIE_DBG(dev, "irq=%d\n", irq);
 
+	/* check for set bits, clear it by setting that bit
+	   and trigger corresponding irq */
 	for (i = 0; i < PCIE20_MSI_CTRL_MAX; i++) {
 		ctrl_status = dev->dm_core +
 				PCIE20_MSI_CTRL_INTR_STATUS + (i * 12);
@@ -4038,7 +4140,7 @@ static irqreturn_t handle_msi_irq(int irq, void *data)
 		while (val) {
 			j = find_first_bit(&val, 32);
 			writel_relaxed(BIT(j), ctrl_status);
-			
+			/* ensure that interrupt is cleared (acked) */
 			wmb();
 			generic_handle_irq(
 			   irq_find_mapping(dev->irq_domain, (j + (32*i)))
@@ -4085,6 +4187,7 @@ void msm_pcie_destroy_irq(unsigned int irq, struct msm_pcie_dev_t *pcie_dev)
 		pos, *dev->msi_irq_in_use);
 }
 
+/* hookup to linux pci msi framework */
 void arch_teardown_msi_irq(unsigned int irq)
 {
 	PCIE_GEN_DBG("irq %d deallocated\n", irq);
@@ -4171,7 +4274,7 @@ static int arch_setup_msi_irq_default(struct pci_dev *pdev,
 
 	irq_set_msi_desc(irq, desc);
 
-	
+	/* write msi vector and data */
 	msg.address_hi = 0;
 	msg.address_lo = MSM_PCIE_MSI_PHY;
 	msg.data = irq - irq_find_mapping(dev->irq_domain, 0);
@@ -4231,7 +4334,7 @@ static int arch_setup_msi_irq_qgic(struct pci_dev *pdev,
 		irq_set_irq_type(irq, IRQ_TYPE_EDGE_RISING);
 	}
 
-	
+	/* write msi vector and data */
 	irq_set_msi_desc(firstirq, desc);
 	msg.address_hi = 0;
 	msg.address_lo = dev->msi_gicm_addr;
@@ -4328,7 +4431,7 @@ int32_t msm_pcie_irq_init(struct msm_pcie_dev_t *dev)
 	else
 		wakeup_source_init(&dev->ws, "RC0 pcie_wakeup_source");
 
-	
+	/* register handler for linkdown interrupt */
 	rc = devm_request_irq(pdev,
 		dev->irq[MSM_PCIE_INT_LINK_DOWN].num, handle_linkdown_irq,
 		IRQF_TRIGGER_RISING, dev->irq[MSM_PCIE_INT_LINK_DOWN].name,
@@ -4339,7 +4442,7 @@ int32_t msm_pcie_irq_init(struct msm_pcie_dev_t *dev)
 		return rc;
 	}
 
-	
+	/* register handler for physical MSI interrupt line */
 	rc = devm_request_irq(pdev,
 		dev->irq[MSM_PCIE_INT_MSI].num, handle_msi_irq,
 		IRQF_TRIGGER_RISING, dev->irq[MSM_PCIE_INT_MSI].name, dev);
@@ -4349,7 +4452,7 @@ int32_t msm_pcie_irq_init(struct msm_pcie_dev_t *dev)
 		return rc;
 	}
 
-	
+	/* register handler for AER interrupt */
 	rc = devm_request_irq(pdev,
 			dev->irq[MSM_PCIE_INT_PLS_ERR].num,
 			handle_aer_irq,
@@ -4364,7 +4467,7 @@ int32_t msm_pcie_irq_init(struct msm_pcie_dev_t *dev)
 		return rc;
 	}
 
-	
+	/* register handler for AER legacy interrupt */
 	rc = devm_request_irq(pdev,
 			dev->irq[MSM_PCIE_INT_AER_LEGACY].num,
 			handle_aer_irq,
@@ -4379,7 +4482,7 @@ int32_t msm_pcie_irq_init(struct msm_pcie_dev_t *dev)
 		return rc;
 	}
 
-	
+	/* register handler for PCIE_WAKE_N interrupt line */
 	rc = devm_request_irq(pdev,
 			dev->wake_n, handle_wake_irq, IRQF_TRIGGER_FALLING,
 			 "msm_pcie_wake", dev);
@@ -4398,7 +4501,7 @@ int32_t msm_pcie_irq_init(struct msm_pcie_dev_t *dev)
 		return rc;
 	}
 
-	
+	/* Create a virtual domain of interrupts */
 	if (!dev->msi_gicm_addr) {
 		dev->irq_domain = irq_domain_add_linear(dev->pdev->dev.of_node,
 			PCIE_MSI_NR_IRQS, &msm_pcie_msi_ops, dev);
@@ -4786,9 +4889,9 @@ int __init pcie_init(void)
 		spin_lock_init(&msm_pcie_dev[i].cfg_lock);
 		msm_pcie_dev[i].cfg_access = true;
 		mutex_init(&msm_pcie_dev[i].setup_lock);
-        
+        /* HTC_WIFI_START */
         mutex_init(&msm_pcie_dev[i].enumerate_lock);
-        
+        /* HTC_WIFI_END */
 		mutex_init(&msm_pcie_dev[i].recovery_lock);
 		spin_lock_init(&msm_pcie_dev[i].linkdown_lock);
 		spin_lock_init(&msm_pcie_dev[i].wakeup_lock);
@@ -4824,6 +4927,7 @@ subsys_initcall_sync(pcie_init);
 module_exit(pcie_exit);
 
 
+/* RC do not represent the right class; set it to PCI_CLASS_BRIDGE_PCI */
 static void msm_pcie_fixup_early(struct pci_dev *dev)
 {
 	struct msm_pcie_dev_t *pcie_dev = PCIE_BUS_PRIV_DATA(dev);
@@ -4834,6 +4938,7 @@ static void msm_pcie_fixup_early(struct pci_dev *dev)
 DECLARE_PCI_FIXUP_EARLY(PCIE_VENDOR_ID_RCP, PCIE_DEVICE_ID_RCP,
 			msm_pcie_fixup_early);
 
+/* Suspend the PCIe link */
 static int msm_pcie_pm_suspend(struct pci_dev *dev,
 			void *user, void *data, u32 options)
 {
@@ -4850,9 +4955,16 @@ static int msm_pcie_pm_suspend(struct pci_dev *dev,
 	PCIE_DBG(pcie_dev, "RC%d\n", pcie_dev->rc_idx);
 #ifdef CONFIG_BCM4356
 	if (pcie_dev->rc_idx == 1) {
+/* HTC_WIFI_START */
+// ** [HPKB#28650] Reduce log size on non-debug ROM
+#if 0
 		PCIE_ERR(pcie_dev, "RC%d: %s\n", pcie_dev->rc_idx, __FUNCTION__);
+#else
+		PCIE_ERR_INTERNAL(pcie_dev, "RC%d: %s\n", pcie_dev->rc_idx, __FUNCTION__);
+#endif
+/* HTC_WIFI_END */
 	}
-#endif 
+#endif /* CONFIG_BCM4356 */
 
 	if (!pcie_dev->power_on) {
 		PCIE_DBG(pcie_dev,
@@ -4886,18 +4998,29 @@ static int msm_pcie_pm_suspend(struct pci_dev *dev,
 		pcie_dev->rc_idx);
 #ifdef CONFIG_BCM4356
 	if (pcie_dev->rc_idx == 1) {
+/* HTC_WIFI_START */
+// ** [HPKB#28650] Reduce log size on non-debug ROM
+#if 0
 		PCIE_ERR(pcie_dev, "RC%d: PME_TURNOFF_MSG is sent out\n",
 			pcie_dev->rc_idx);
+#else
+		PCIE_ERR_INTERNAL(pcie_dev, "RC%d: PME_TURNOFF_MSG is sent out\n",
+			pcie_dev->rc_idx);
+#endif
+/* HTC_WIFI_END */
 	}
-#endif 
+#endif /* CONFIG_BCM4356 */
 
 	ret_l23 = readl_poll_timeout((pcie_dev->parf
 		+ PCIE20_PARF_PM_STTS), val, (val & BIT(5)), 10000, 100000);
 
-	
+	/* check L23_Ready */
 	PCIE_DBG(pcie_dev, "RC%d: PCIE20_PARF_PM_STTS is 0x%x.\n",
 		pcie_dev->rc_idx,
 		readl_relaxed(pcie_dev->parf + PCIE20_PARF_PM_STTS));
+
+/* HTC_WIFI_START */
+#if 0
 	if (!ret_l23)
 		PCIE_DBG(pcie_dev, "RC%d: PM_Enter_L23 is received\n",
 			pcie_dev->rc_idx);
@@ -4905,17 +5028,22 @@ static int msm_pcie_pm_suspend(struct pci_dev *dev,
 		PCIE_DBG(pcie_dev, "RC%d: PM_Enter_L23 is NOT received\n",
 			pcie_dev->rc_idx);
 
+#else
 #ifdef CONFIG_BCM4356
 	if (pcie_dev->rc_idx == 1) {
 		if (!ret_l23) {
-			PCIE_ERR(pcie_dev, "RC%d: PM_Enter_L23 is received\n",
+			// ** [HPKB#28650] Reduce log size on non-debug ROM
+			PCIE_ERR_INTERNAL(pcie_dev, "RC%d: PM_Enter_L23 is received\n",
 				pcie_dev->rc_idx);
 		} else {
 			PCIE_ERR(pcie_dev, "RC%d: PM_Enter_L23 is NOT received\n",
 				pcie_dev->rc_idx);
 		}
 	}
-#endif 
+#endif /* CONFIG_BCM4356 */
+#endif
+/* HTC_WIFI_END */
+
 		msm_pcie_disable(pcie_dev, PM_PIPE_CLK | PM_CLK | PM_VREG);
 
 	if (pcie_dev->use_pinctrl && pcie_dev->pins_sleep)
@@ -4932,9 +5060,16 @@ static void msm_pcie_fixup_suspend(struct pci_dev *dev)
 
 #ifdef CONFIG_BCM4356
 	if (pcie_dev->rc_idx == 1) {
+/* HTC_WIFI_START */
+// ** [HPKB#28650] Reduce log size on non-debug ROM
+#if 0
 		PCIE_ERR(pcie_dev, "RC%d %s\n", pcie_dev->rc_idx, __FUNCTION__);
+#else
+		PCIE_ERR_INTERNAL(pcie_dev, "RC%d %s\n", pcie_dev->rc_idx, __FUNCTION__);
+#endif
+/* HTC_WIFI_END */
 	}
-#endif 
+#endif /* CONFIG_BCM4356 */
 	PCIE_DBG(pcie_dev, "RC%d\n", pcie_dev->rc_idx);
 
 	if (pcie_dev->link_status != MSM_PCIE_LINK_ENABLED)
@@ -4965,6 +5100,7 @@ static void msm_pcie_fixup_suspend(struct pci_dev *dev)
 DECLARE_PCI_FIXUP_SUSPEND(PCIE_VENDOR_ID_RCP, PCIE_DEVICE_ID_RCP,
 			  msm_pcie_fixup_suspend);
 
+/* Resume the PCIe link */
 static int msm_pcie_pm_resume(struct pci_dev *dev,
 			void *user, void *data, u32 options)
 {
@@ -4976,7 +5112,7 @@ static int msm_pcie_pm_resume(struct pci_dev *dev,
 	if (pcie_dev->rc_idx == 1) {
 		PCIE_ERR(pcie_dev, "RC%d %s\n", pcie_dev->rc_idx, __FUNCTION__);
 	}
-#endif 
+#endif /* CONFIG_BCM4356 */
 
 	if (pcie_dev->use_pinctrl && pcie_dev->pins_default)
 		pinctrl_select_state(pcie_dev->pinctrl,
@@ -5018,9 +5154,16 @@ void msm_pcie_fixup_resume(struct pci_dev *dev)
 	PCIE_DBG(pcie_dev, "RC%d\n", pcie_dev->rc_idx);
 #ifdef CONFIG_BCM4356
 	if (pcie_dev->rc_idx == 1) {
+/* HTC_WIFI_START */
+// ** [HPKB#28650] Reduce log size on non-debug ROM
+#if 0
 		PCIE_ERR(pcie_dev, "RC%d %s\n", pcie_dev->rc_idx, __FUNCTION__);
+#else
+		PCIE_ERR_INTERNAL(pcie_dev, "RC%d %s\n", pcie_dev->rc_idx, __FUNCTION__);
+#endif
+/* HTC_WIFI_END */
 	}
-#endif 
+#endif /* CONFIG_BCM4356 */
 
 	if ((pcie_dev->link_status != MSM_PCIE_LINK_DISABLED) ||
 		pcie_dev->user_suspend)
@@ -5078,9 +5221,9 @@ int msm_pcie_pm_control(enum msm_pcie_pm_opt pm_opt, u32 busnr, void *user,
 
 			if (pcie_dev) {
 				rc_idx = pcie_dev->rc_idx;
-                                
+                                /* HTC_WIFI_START */
 				PCIE_ERR(pcie_dev,
-                                
+                                /* HTC_WIFI_END */
 					"PCIe: RC%d: pm_opt:%d;busnr:%d;options:%d\n",
 					rc_idx, pm_opt, busnr, options);
 			} else {
@@ -5100,11 +5243,13 @@ int msm_pcie_pm_control(enum msm_pcie_pm_opt pm_opt, u32 busnr, void *user,
 
 	dev = msm_pcie_dev[rc_idx].dev;
 
+/* HTC_WIFI_START */
     if (!dev) {
         PCIE_ERR(&msm_pcie_dev[rc_idx],
                 "RC%d dev is NULL\n", rc_idx);
         return -ENODEV;
     }
+/* HTC_WIFI_END */
 
 	if (!msm_pcie_dev[rc_idx].drv_ready) {
 		PCIE_ERR(&msm_pcie_dev[rc_idx],

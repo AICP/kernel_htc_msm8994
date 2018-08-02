@@ -46,10 +46,12 @@
 #include "q6voice.h"
 #include "sound/q6lsm.h"
 
+//htc audio ++
 #undef pr_info
 #undef pr_err
 #define pr_info(fmt, ...) pr_aud_info(fmt, ##__VA_ARGS__)
 #define pr_err(fmt, ...) pr_aud_err(fmt, ##__VA_ARGS__)
+//htc audio --
 
 static int get_cal_path(int path_type);
 
@@ -67,11 +69,11 @@ static int fm_switch_enable;
 static int fm_pcmrx_switch_enable;
 static int lsm_mux_slim_port;
 static int slim0_rx_aanc_fb_port;
-static int msm_route_ec_ref_rx = 8; 
+static int msm_route_ec_ref_rx = 8; /* NONE */
 static uint32_t voc_session_id = ALL_SESSION_VSID;
-static int msm_route_ext_ec_ref[MAX_VOC_SESSIONS] = { AFE_PORT_INVALID }; 
-static bool is_custom_stereo_on = false; 
-static bool is_ds2_on = false; 
+static int msm_route_ext_ec_ref[MAX_VOC_SESSIONS] = { AFE_PORT_INVALID }; //htc audio
+static bool is_custom_stereo_on = false; // HTC AUDIO
+static bool is_ds2_on = false; // HTC AUDIO
 
 enum {
 	MADNONE,
@@ -138,6 +140,7 @@ static void msm_pcm_routing_cfg_pp(int port_id, int copp_idx, int topology,
 	int rc = 0;
 	switch (topology) {
 	case SRS_TRUMEDIA_TOPOLOGY_ID:
+	case HTC_SRS_TOPOLOGY_ID: // HTC_AUD
 		pr_debug("%s: SRS_TRUMEDIA_TOPOLOGY_ID\n", __func__);
 		msm_dts_srs_tm_init(port_id, copp_idx);
 		break;
@@ -182,6 +185,7 @@ static void msm_pcm_routing_deinit_pp(int port_id, int topology)
 {
 	switch (topology) {
 	case SRS_TRUMEDIA_TOPOLOGY_ID:
+	case HTC_SRS_TOPOLOGY_ID: // HTC_AUD
 		pr_debug("%s: SRS_TRUMEDIA_TOPOLOGY_ID\n", __func__);
 		msm_dts_srs_tm_deinit(port_id);
 		break;
@@ -352,20 +356,21 @@ static unsigned long session_copp_map[MSM_FRONTEND_DAI_MM_SIZE][2]
 static struct msm_pcm_routing_app_type_data app_type_cfg[MAX_APP_TYPES];
 static struct msm_pcm_stream_app_type_cfg
 			 fe_dai_app_type_cfg[MSM_FRONTEND_DAI_MM_SIZE];
-static struct htc_adm_effect_s htc_adm_effect[HTC_ADM_EFFECT_MAX];
+//HTC_AUD ++
+static struct htc_adm_effect_s htc_adm_effect[HTC_ADM_EFFECT_MAX+1];
 
 static int msm_routing_send_htc_adm_params(u16 port_id, int copp_idx, int perf_mode)
 {
 	int i = 0;
 	int ret = 0;
 
-	if(perf_mode != LEGACY_PCM_MODE) 
+	if(perf_mode != LEGACY_PCM_MODE) //don't send param to low latency
 		return ret;
 
 	for(i=0; i<HTC_ADM_EFFECT_MAX; i++) {
 		if(htc_adm_effect[i].used) {
 			if(htc_adm_effect[i].port_id == port_id) {
-				pr_info("%s: apply copp_idx 0x%x param_id 0x%x\n",__func__,copp_idx, htc_adm_effect[i].param_id);
+				pr_debug("%s: apply copp_idx 0x%x param_id 0x%x\n",__func__,copp_idx, htc_adm_effect[i].param_id);
 				ret = q6adm_enable_effect(port_id, copp_idx, htc_adm_effect[i].copp_id, htc_adm_effect[i].param_id,
 					htc_adm_effect[i].payload_size, htc_adm_effect[i].payload);
 
@@ -417,7 +422,7 @@ int htc_adm_effect_control(enum HTC_ADM_EFFECT_ID effect_id, u16 port_id, uint32
 		for_each_set_bit(i, &msm_bedais[be_idx].fe_sessions,
 				MSM_FRONTEND_DAI_MM_SIZE) {
 
-			if(fe_dai_map[i][SESSION_TYPE_RX].perf_mode != LEGACY_PCM_MODE) 
+			if(fe_dai_map[i][SESSION_TYPE_RX].perf_mode != LEGACY_PCM_MODE) //don't send param to low latency
 				continue;
 
 			for (copp_idx = 0; copp_idx < MAX_COPPS_PER_PORT; copp_idx++) {
@@ -426,7 +431,7 @@ int htc_adm_effect_control(enum HTC_ADM_EFFECT_ID effect_id, u16 port_id, uint32
 					[SESSION_TYPE_RX][be_idx];
 
 				if (test_bit(copp_idx, &copp)) {
-					pr_info("%s: apply fe %d copp_idx 0x%x param_id 0x%x\n",__func__,i,copp_idx, param_id);
+					pr_debug("%s: apply fe %d copp_idx 0x%x param_id 0x%x\n",__func__,i,copp_idx, param_id);
 					ret = q6adm_enable_effect(port_id, copp_idx, copp_id, param_id,
 						payload_size, payload);
 
@@ -473,6 +478,7 @@ int msm_pcm_routing_get_port(struct snd_pcm_substream *substream, u16 *port_id)
 
 	return cnt;
 }
+//HTC_AUD --
 
 /* The caller of this should aqcuire routing lock */
 void msm_pcm_routing_get_bedai_info(int be_idx,
@@ -661,9 +667,11 @@ static void msm_pcm_routing_build_matrix(int fedai_id, int sess_type,
 		adm_matrix_map(path_type, payload, perf_mode);
 		msm_pcm_routng_cfg_matrix_map_pp(payload, path_type, perf_mode);
 
+//htc audio ++
 		for(i=0; i<num_copps; i++) {
 			msm_routing_send_htc_adm_params(payload.port_id[i],payload.copp_idx[i], perf_mode);
 		}
+//htc audio --
 	}
 }
 
@@ -816,9 +824,11 @@ int msm_pcm_routing_reg_phy_compr_stream(int fe_id, int perf_mode,
 		payload.acdb_dev_id = fe_dai_app_type_cfg[fe_id].acdb_dev_id;
 		adm_matrix_map(path_type, payload, perf_mode);
 		msm_pcm_routng_cfg_matrix_map_pp(payload, path_type, perf_mode);
+//htc audio ++
 		for(i=0; i<num_copps; i++) {
 			msm_routing_send_htc_adm_params(payload.port_id[i],payload.copp_idx[i],perf_mode);
 		}
+//htc audio --
 	}
 	mutex_unlock(&routing_lock);
 	return 0;
@@ -965,9 +975,11 @@ int msm_pcm_routing_reg_phy_stream(int fedai_id, int perf_mode,
 		payload.sample_rate = fe_dai_app_type_cfg[fedai_id].sample_rate;
 		adm_matrix_map(path_type, payload, perf_mode);
 		msm_pcm_routng_cfg_matrix_map_pp(payload, path_type, perf_mode);
+//htc audio ++
 		for(i=0; i<num_copps; i++) {
 			msm_routing_send_htc_adm_params(payload.port_id[i],payload.copp_idx[i],perf_mode);
 		}
+//htc audio --
 	}
 	mutex_unlock(&routing_lock);
 	return 0;
@@ -1408,6 +1420,7 @@ static int msm_routing_put_voice_stub_mixer(struct snd_kcontrol *kcontrol,
 	return 1;
 }
 
+//HTC_AUD ++
 int htc_fm_switch_enable = 0;
 static int msm_htc_routing_get_switch_mixer(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_value *ucontrol)
@@ -1431,6 +1444,7 @@ static int msm_htc_routing_put_switch_mixer(struct snd_kcontrol *kcontrol,
 	htc_fm_switch_enable = ucontrol->value.integer.value[0];
 	return 1;
 }
+//HTC_AUD --
 
 static int msm_routing_get_switch_mixer(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_value *ucontrol)
@@ -1963,6 +1977,7 @@ static const struct snd_kcontrol_new ext_ec_ref_mux_ul9 =
 	SOC_DAPM_ENUM_EXT("AUDIO_REF_EC_UL9 MUX Mux",
 		msm_route_ec_ref_rx_enum[0],
 		msm_routing_ec_ref_rx_get, msm_routing_ec_ref_rx_put);
+//htc audio ++
 static int msm_routing_ext_ec_get(struct snd_kcontrol *kcontrol,
 				  struct snd_ctl_elem_value *ucontrol)
 {
@@ -2060,11 +2075,13 @@ static int msm_routing_ext_ec_put(struct snd_kcontrol *kcontrol,
 	}
 	return ret;
 }
+//htc audio --
 
 static const char * const ext_ec_ref_rx[] = {"NONE", "PRI_MI2S_TX",
 					     "SEC_MI2S_TX", "TERT_MI2S_TX",
 					     "QUAT_MI2S_TX"};
 
+//htc audio ++
 static const struct soc_enum msm_route_ext_ec_ref_rx_enum[] = {
 	SOC_ENUM_SINGLE(MSM_FRONTEND_DAI_CS_VOICE, 0, ARRAY_SIZE(ext_ec_ref_rx), ext_ec_ref_rx),
 	SOC_ENUM_SINGLE(MSM_FRONTEND_DAI_VOIP, 0, ARRAY_SIZE(ext_ec_ref_rx), ext_ec_ref_rx),
@@ -2088,6 +2105,7 @@ static const struct snd_kcontrol_new voc_ext_ec_mux[] = {
 	SOC_DAPM_ENUM_EXT("VOWLAN_EXT_EC MUX Mux", msm_route_ext_ec_ref_rx_enum[5],
 			  msm_routing_ext_ec_get, msm_routing_ext_ec_put),
 };
+//htc audio --
 
 static const struct snd_kcontrol_new pri_i2s_rx_mixer_controls[] = {
 	SOC_SINGLE_EXT("MultiMedia1", MSM_BACKEND_DAI_PRI_I2S_RX ,
@@ -3029,9 +3047,17 @@ static const struct snd_kcontrol_new mmul5_mixer_controls[] = {
 	SOC_SINGLE_EXT("AUX_PCM_TX", MSM_BACKEND_DAI_AUXPCM_TX,
 	MSM_FRONTEND_DAI_MULTIMEDIA5, 1, 0, msm_routing_get_audio_mixer,
 	msm_routing_put_audio_mixer),
+//HTC_AUD_START
+#if 0
 	SOC_SINGLE_EXT("SEC_AUX_PCM_TX", MSM_BACKEND_DAI_SEC_AUXPCM_TX,
 	MSM_FRONTEND_DAI_MULTIMEDIA5, 1, 0, msm_routing_get_audio_mixer,
 	msm_routing_put_audio_mixer),
+#else
+	SOC_SINGLE_EXT("SEC_AUX_PCM_UL_TX", MSM_BACKEND_DAI_SEC_AUXPCM_TX,
+	MSM_FRONTEND_DAI_MULTIMEDIA5, 1, 0, msm_routing_get_audio_mixer,
+	msm_routing_put_audio_mixer),
+#endif
+//HTC_AUD_END
 	SOC_SINGLE_EXT("PRI_MI2S_TX", MSM_BACKEND_DAI_PRI_MI2S_TX,
 	MSM_FRONTEND_DAI_MULTIMEDIA5, 1, 0, msm_routing_get_audio_mixer,
 	msm_routing_put_audio_mixer),
@@ -3916,9 +3942,11 @@ static const struct snd_kcontrol_new quat_mi2s_rx_port_mixer_controls[] = {
 	SOC_SINGLE_EXT("INTERNAL_FM_TX", MSM_BACKEND_DAI_QUATERNARY_MI2S_RX,
 	MSM_BACKEND_DAI_INT_FM_TX, 1, 0, msm_routing_get_port_mixer,
 	msm_routing_put_port_mixer),
+//HTC_AUD ++
 	SOC_SINGLE_EXT("SLIM_0_TX", MSM_BACKEND_DAI_QUATERNARY_MI2S_RX,
 	MSM_BACKEND_DAI_SLIMBUS_0_TX, 1, 0, msm_routing_get_port_mixer,
 	msm_routing_put_port_mixer),
+//HTC_AUD --
 	SOC_SINGLE_EXT("QUAT_MI2S_TX", MSM_BACKEND_DAI_QUATERNARY_MI2S_RX,
 	MSM_BACKEND_DAI_QUATERNARY_MI2S_TX, 1, 0, msm_routing_get_port_mixer,
 	msm_routing_put_port_mixer),
@@ -3971,6 +3999,7 @@ static const struct snd_kcontrol_new slim3_fm_switch_mixer_controls =
 	SOC_SINGLE_EXT("Switch", SND_SOC_NOPM,
 	0, 1, 0, msm_routing_get_switch_mixer,
 	msm_routing_put_switch_mixer);
+//HTC_AUD ++
 static const struct snd_kcontrol_new htc_switch_mixer_controls =
 	SOC_SINGLE_EXT("Switch", SND_SOC_NOPM,
 	0, 1, 0, msm_htc_routing_get_switch_mixer,
@@ -4003,6 +4032,7 @@ static const struct snd_kcontrol_new htc_switch_mixer_controls_stub_qmi2s =
 	SOC_SINGLE_EXT("Switch", SND_SOC_NOPM,
 	0, 1, 0, msm_htc_routing_get_switch_mixer,
 	msm_htc_routing_put_switch_mixer);
+//HTC_AUD --
 static const struct snd_kcontrol_new slim4_fm_switch_mixer_controls =
 	SOC_SINGLE_EXT("Switch", SND_SOC_NOPM,
 	0, 1, 0, msm_routing_get_switch_mixer,
@@ -4199,7 +4229,9 @@ static int msm_routing_put_stereo_to_custom_stereo_control(
 					rc = msm_ds2_dap_set_custom_stereo_onoff
 						(msm_bedais[be_index].port_id,
 						idx, is_custom_stereo_on);
+				// htc audio ++
 				else if (topo_id == DOLBY_ADM_COPP_TOPOLOGY_ID)
+				// htc audio --
 					rc = dolby_dap_set_custom_stereo_onoff(
 						msm_bedais[be_index].port_id,
 						idx, is_custom_stereo_on);
@@ -4697,7 +4729,8 @@ static const struct snd_soc_dapm_widget msm_qdsp6_widgets[] = {
 				&hfp_aux_switch_mixer_controls),
 	SND_SOC_DAPM_SWITCH("HFP_INT_UL_HL", SND_SOC_NOPM, 0, 0,
 				&hfp_int_switch_mixer_controls),
-	SND_SOC_DAPM_AIF_IN("MM_STUB_DL", "MM_STUB Playback", 0, 0, 0, 0),
+//HTC_AUD ++
+	SND_SOC_DAPM_AIF_IN("MM_STUB_DL", "MM_STUB Playback", 0, 0, 0, 0),//htc audio: add for open_dummy_stream() at AHAL
 	SND_SOC_DAPM_SWITCH("QUAT_MI2S_RX_DL_HL", SND_SOC_NOPM, 0, 0,
 				&htc_switch_mixer_controls),
 	SND_SOC_DAPM_SWITCH("QUAT_MI2S_RX_DL_HL_FM", SND_SOC_NOPM, 0, 0,
@@ -4717,8 +4750,9 @@ static const struct snd_soc_dapm_widget msm_qdsp6_widgets[] = {
 	SND_SOC_DAPM_SWITCH("SLIMBUS_DL_COMPR_STUB", SND_SOC_NOPM, 0, 0,
 				&htc_switch_mixer_controls_stub_slim),
 
+//HTC_AUD --
 
-	
+	/* Mux Definitions */
 	SND_SOC_DAPM_MUX("LSM1 MUX", SND_SOC_NOPM, 0, 0, &lsm1_mux),
 	SND_SOC_DAPM_MUX("LSM2 MUX", SND_SOC_NOPM, 0, 0, &lsm2_mux),
 	SND_SOC_DAPM_MUX("LSM3 MUX", SND_SOC_NOPM, 0, 0, &lsm3_mux),
@@ -4925,7 +4959,7 @@ static const struct snd_soc_dapm_widget msm_qdsp6_widgets[] = {
 				&slim0_rx_vi_fb_lch_mux),
 	SND_SOC_DAPM_MUX("SLIM0_RX_VI_FB_RCH_MUX", SND_SOC_NOPM, 0, 0,
 				&slim0_rx_vi_fb_rch_mux),
-
+//htc audio ++
 	SND_SOC_DAPM_MUX("VOC_EXT_EC MUX", SND_SOC_NOPM, 0, 0,
 			 &voc_ext_ec_mux[0]),
 	SND_SOC_DAPM_MUX("VOIP_EXT_EC MUX", SND_SOC_NOPM, 0, 0,
@@ -4938,6 +4972,7 @@ static const struct snd_soc_dapm_widget msm_qdsp6_widgets[] = {
 			 &voc_ext_ec_mux[4]),
 	SND_SOC_DAPM_MUX("VOWLAN_EXT_EC MUX", SND_SOC_NOPM, 0, 0,
 			 &voc_ext_ec_mux[5]),
+//htc audio --
 	SND_SOC_DAPM_MUX("AUDIO_REF_EC_UL1 MUX", SND_SOC_NOPM, 0, 0,
 		&ext_ec_ref_mux_ul1),
 	SND_SOC_DAPM_MUX("AUDIO_REF_EC_UL2 MUX", SND_SOC_NOPM, 0, 0,
@@ -5008,8 +5043,10 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"SLIMBUS_0_RX Audio Mixer", "MultiMedia15", "MM_DL15"},
 	{"SLIMBUS_0_RX Audio Mixer", "MultiMedia16", "MM_DL16"},
 	{"SLIMBUS_0_RX", NULL, "SLIMBUS_0_RX Audio Mixer"},
+//htc audio ++: add for open_dummy_stream() at AHAL
 	{"SLIMBUS_DL_COMPR_STUB", "Switch", "MM_STUB_DL"},
 	{"SLIMBUS_0_RX", NULL, "SLIMBUS_DL_COMPR_STUB"},
+//htc audio --
 
 	{"HDMI Mixer", "MultiMedia1", "MM_DL1"},
 	{"HDMI Mixer", "MultiMedia2", "MM_DL2"},
@@ -5124,8 +5161,10 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"QUAT_MI2S_RX Audio Mixer", "MultiMedia15", "MM_DL15"},
 	{"QUAT_MI2S_RX Audio Mixer", "MultiMedia16", "MM_DL16"},
 	{"QUAT_MI2S_RX", NULL, "QUAT_MI2S_RX Audio Mixer"},
+//htc audio ++: add for open_dummy_stream() at AHAL
 	{"QUAT_MI2S_DL_COMPR_STUB", "Switch", "MM_STUB_DL"},
 	{"QUAT_MI2S_RX", NULL, "QUAT_MI2S_DL_COMPR_STUB"},
+//htc audio --
 
 	{"TERT_MI2S_RX Audio Mixer", "MultiMedia1", "MM_DL1"},
 	{"TERT_MI2S_RX Audio Mixer", "MultiMedia2", "MM_DL2"},
@@ -5140,8 +5179,10 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"TERT_MI2S_RX Audio Mixer", "MultiMedia15", "MM_DL15"},
 	{"TERT_MI2S_RX Audio Mixer", "MultiMedia16", "MM_DL16"},
 	{"TERT_MI2S_RX", NULL, "TERT_MI2S_RX Audio Mixer"},
+//htc audio ++: add for open_dummy_stream() at AHAL
 	{"TERT_MI2S_DL_COMPR_STUB", "Switch", "MM_STUB_DL"},
 	{"TERT_MI2S_RX", NULL, "TERT_MI2S_DL_COMPR_STUB"},
+//htc audio --
 
 	{"SEC_MI2S_RX Audio Mixer", "MultiMedia1", "MM_DL1"},
 	{"SEC_MI2S_RX Audio Mixer", "MultiMedia2", "MM_DL2"},
@@ -5157,8 +5198,10 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"SEC_MI2S_RX Audio Mixer", "MultiMedia15", "MM_DL15"},
 	{"SEC_MI2S_RX Audio Mixer", "MultiMedia16", "MM_DL16"},
 	{"SEC_MI2S_RX", NULL, "SEC_MI2S_RX Audio Mixer"},
+//htc audio ++: add for open_dummy_stream() at AHAL
 	{"SEC_MI2S_DL_COMPR_STUB", "Switch", "MM_STUB_DL"},
 	{"SEC_MI2S_RX", NULL, "SEC_MI2S_DL_COMPR_STUB"},
+//htc audio --
 
 
 	{"SEC_MI2S_RX_SD1 Audio Mixer", "MultiMedia6", "MM_DL6"},
@@ -5194,7 +5237,13 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"MultiMedia1 Mixer", "AUX_PCM_UL_TX", "AUX_PCM_TX"},
 	{"MultiMedia5 Mixer", "AUX_PCM_TX", "AUX_PCM_TX"},
 	{"MultiMedia1 Mixer", "SEC_AUX_PCM_UL_TX", "SEC_AUX_PCM_TX"},
+//HTC_AUD_START
+#if 0
 	{"MultiMedia5 Mixer", "SEC_AUX_PCM_TX", "SEC_AUX_PCM_TX"},
+#else
+	{"MultiMedia5 Mixer", "SEC_AUX_PCM_UL_TX", "SEC_AUX_PCM_TX"},
+#endif
+//HTC_AUD_END
 	{"MultiMedia2 Mixer", "SLIM_0_TX", "SLIMBUS_0_TX"},
 	{"MultiMedia1 Mixer", "SEC_MI2S_TX", "SEC_MI2S_TX"},
 	{"MultiMedia1 Mixer", "PRI_MI2S_TX", "PRI_MI2S_TX"},
@@ -5455,6 +5504,7 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"VOC_EXT_EC MUX", "QUAT_MI2S_TX" , "QUAT_MI2S_TX"},
 	{"CS-VOICE_UL1", NULL, "VOC_EXT_EC MUX"},
 
+//htc audio ++
 	{"VOIP_EXT_EC MUX", "PRI_MI2S_TX" , "PRI_MI2S_TX"},
 	{"VOIP_EXT_EC MUX", "SEC_MI2S_TX" , "SEC_MI2S_TX"},
 	{"VOIP_EXT_EC MUX", "TERT_MI2S_TX" , "TERT_MI2S_TX"},
@@ -5478,6 +5528,7 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"VOWLAN_EXT_EC MUX", "TERT_MI2S_TX" , "TERT_MI2S_TX"},
 	{"VOWLAN_EXT_EC MUX", "QUAT_MI2S_TX" , "QUAT_MI2S_TX"},
 	{"VoWLAN_UL", NULL, "VOWLAN_EXT_EC MUX"},
+//htc audio --
 
 	{"AUDIO_REF_EC_UL1 MUX", "PRI_MI2S_TX" , "PRI_MI2S_TX"},
 	{"AUDIO_REF_EC_UL1 MUX", "SEC_MI2S_TX" , "SEC_MI2S_TX"},
@@ -5579,11 +5630,13 @@ static const struct snd_soc_dapm_route intercon[] = {
 
 	{"SLIMBUS_DL_HL", "Switch", "SLIM0_DL_HL"},
 	{"SLIMBUS_0_RX", NULL, "SLIMBUS_DL_HL"},
+//HTC_AUD ++
 	{"QUAT_MI2S_RX_DL_HL", "Switch", "QUAT_MI2S_DL_HL"},
 	{"QUAT_MI2S_RX_DL_HL_FM", "Switch", "SLIM0_DL_HL"},
 	{"QUAT_MI2S_RX", NULL, "QUAT_MI2S_RX_DL_HL_FM"},
 	{"QUAT_MI2S_RX", NULL, "QUAT_MI2S_RX_DL_HL"},
 	{"QUAT_MI2S_RX Port Mixer", "SLIM_0_TX", "SLIMBUS_0_TX"},
+//HTC_AUD --
 	{"SLIMBUS1_DL_HL", "Switch", "SLIM1_DL_HL"},
 	{"SLIMBUS_1_RX", NULL, "SLIMBUS1_DL_HL"},
 	{"SLIMBUS3_DL_HL", "Switch", "SLIM3_DL_HL"},
@@ -5696,7 +5749,7 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"SEC_I2S_RX", NULL, "SEC_I2S_DL_HL"},
 	{"PRI_MI2S_TX_HL", "Switch", "PRI_MI2S_TX"},
 	{"PRI_MI2S_UL_HL", NULL, "PRI_MI2S_TX_HL"},
-	
+	//{"PRI_MI2S_UL_HL", NULL, "PRI_MI2S_TX"},
 	{"SEC_MI2S_RX", NULL, "SEC_MI2S_DL_HL"},
 	{"PRI_MI2S_RX", NULL, "PRI_MI2S_DL_HL"},
 	{"QUAT_MI2S_UL_HL", NULL, "QUAT_MI2S_TX"},
@@ -5817,7 +5870,7 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"QUAT_MI2S_RX Port Mixer", "PRI_MI2S_TX", "PRI_MI2S_TX"},
 	{"QUAT_MI2S_RX Port Mixer", "TERT_MI2S_TX", "TERT_MI2S_TX"},
 	{"QUAT_MI2S_RX Port Mixer", "QUAT_MI2S_TX", "QUAT_MI2S_TX"},
-	{"QUAT_MI2S_RX Port Mixer", "SLIM_0_TX", "SLIMBUS_0_TX"}, 
+	{"QUAT_MI2S_RX Port Mixer", "SLIM_0_TX", "SLIMBUS_0_TX"}, // HTC_ADD
 	{"QUAT_MI2S_RX Port Mixer", "INTERNAL_FM_TX", "INT_FM_TX"},
 	{"QUAT_MI2S_RX", NULL, "QUAT_MI2S_RX Port Mixer"},
 
@@ -5825,7 +5878,7 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"TERT_MI2S_RX Port Mixer", "TERT_MI2S_TX", "TERT_MI2S_TX"},
 	{"TERT_MI2S_RX Port Mixer", "QUAT_MI2S_TX", "QUAT_MI2S_TX"},
 	{"TERT_MI2S_RX", NULL, "TERT_MI2S_RX Port Mixer"},
-	
+	/* Backend Enablement */
 
 	{"BE_OUT", NULL, "PRI_I2S_RX"},
 	{"BE_OUT", NULL, "SEC_I2S_RX"},
@@ -6452,7 +6505,9 @@ static int __init msm_soc_routing_platform_init(void)
 	if (msm_routing_init_cal_data())
 		pr_err("%s: could not init cal data!\n", __func__);
 
+//htc audio ++
 	memset(htc_adm_effect,0, sizeof(struct htc_adm_effect_s)*HTC_ADM_EFFECT_MAX);
+//htc audio --
 	return platform_driver_register(&msm_routing_pcm_driver);
 }
 module_init(msm_soc_routing_platform_init);

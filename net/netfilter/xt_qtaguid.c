@@ -2282,6 +2282,7 @@ static int ctrl_cmd_tag(const char *input)
 		 * There is still the ref from this call's sockfd_lookup() so
 		 * it can be done within the spinlock.
 		 */
+		/* ++Radio-NW@20140822: fix kernel panic while socket->file is NULL++ */
 #ifdef CONFIG_HTC_NETWORK_MODIFY
 		if(likely(sock_tag_entry->socket->file))
 			sockfd_put(sock_tag_entry->socket);
@@ -2292,7 +2293,7 @@ static int ctrl_cmd_tag(const char *input)
 #else
 		sockfd_put(sock_tag_entry->socket);
 #endif
-		
+		/* --Radio-NW@20140822: fix kernel panic while socket->file is NULL-- */
 
 		prev_tag_ref_entry = lookup_tag_ref(sock_tag_entry->tag,
 						    &uid_tag_data_entry);
@@ -2435,6 +2436,7 @@ static int ctrl_cmd_untag(const char *input)
 	 * Release the sock_fd that was grabbed at tag time,
 	 * and once more for the sockfd_lookup() here.
 	 */
+	/* ++Radio-NW@20141003: fix kernel panic while socket->file is NULL++ */
 #ifdef CONFIG_HTC_NETWORK_MODIFY
 	if(likely(sock_tag_entry->socket->file))
 		sockfd_put(sock_tag_entry->socket);
@@ -2445,6 +2447,7 @@ static int ctrl_cmd_untag(const char *input)
 #else
 	sockfd_put(sock_tag_entry->socket);
 #endif
+	/* --Radio-NW@20141003: fix kernel panic while socket->file is NULL-- */
 	CT_DEBUG("qtaguid: ctrl_untag(%s): done. st@%p ...->f_count=%ld\n",
 		 input, sock_tag_entry,
 		 atomic_long_read(&el_socket->file->f_count) - 1);

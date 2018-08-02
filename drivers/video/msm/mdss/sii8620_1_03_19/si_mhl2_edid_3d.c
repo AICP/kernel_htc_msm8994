@@ -65,6 +65,14 @@ struct timing_mode_from_data_sheet_t {
 	char *description;
 };
 
+/* note that this table is sorted by:
+	columns,
+	then by rows,
+	then by field_rate,
+	then by h_total,
+	then by v_total,
+	then by pixel_clock.
+*/
 
 struct timing_mode_from_data_sheet_t timing_modes[] = {
 	{ 832,  445,  640,  350,  85,  31500000,  0, {0, 0}, "640x350-85"},
@@ -283,11 +291,16 @@ void display_timing_enumeration_end(struct edid_3d_data_t *mhl_edid_3d_data)
 
 	hw_context->callbacks.display_timing_enum_end(
 		hw_context->callbacks.context);
+	/* MHL3.0 spec requires that,in response to FEAT_REQ, all 3D_VIC and
+	 * 3D_DTD bursts shall be sent before all HEV_VIC and HEV_DTD bursts.
+	 * Now that we're done with all of the above, pair up the 3D_VIC and
+	 * 3D_DTD data with the HEV_VIC and HEV_DTD data.
+	 */
 	if (NULL == mhl_edid_3d_data->hev_vic_list) {
 		MHL_TX_DBG_WARN("no HEV_VICs\n");
 	} else if (NULL == mhl_edid_3d_data->_3d_vic_list) {
 		MHL_TX_DBG_WARN("no 3D_VICs\n");
-		
+		/* do nothing */
 	} else if (mhl_edid_3d_data->hev_vic_info.num_items) {
 		MHL_TX_DBG_WARN("\n");
 		count_hev = mhl_edid_3d_data->hev_vic_info.num_items;
@@ -302,11 +315,11 @@ void display_timing_enumeration_end(struct edid_3d_data_t *mhl_edid_3d_data)
 		}
 	}
 	if (NULL == mhl_edid_3d_data->hev_dtd_list) {
-		
+		/* do nothing */
 		MHL_TX_DBG_WARN("no HEV_DTDs\n");
 	} else if (NULL == mhl_edid_3d_data->_3d_dtd_list) {
 		MHL_TX_DBG_WARN("no 3D_DTDs\n");
-		
+		/* do nothing */
 	} else if (mhl_edid_3d_data->hev_dtd_info.num_items) {
 		MHL_TX_DBG_WARN(
 		    "num_vesa_timing_dtds:0x%x num_cea_861_timing_dtds:0x%x\n",
@@ -334,7 +347,7 @@ void display_timing_enumeration_end(struct edid_3d_data_t *mhl_edid_3d_data)
 static bool field_rate_within_measurement_precision(int table, int measured)
 {
 int difference;
-	
+	/* reference clock varies +/- 5% */
 	difference = table - measured;
 	difference *= 100;
 	difference /= table;
@@ -344,6 +357,15 @@ int difference;
 	return true;
 }
 
+/*
+ * si_mhl_tx_validate_timings_table
+ *
+ * Returns the number of indistinct timing modes in
+ *	timing_modes_from_data_sheet.
+ *
+ * This is included to sound the alarm if the table contains entries that
+ *	cannot be reliably distinguished from each other.
+ */
 static int validate_timings_table(void)
 {
 	int match_count = 0;
@@ -527,6 +549,7 @@ struct SI_PACK_THIS_STRUCT HDMI_VIC_info_t {
 	uint8_t corresponding_MHL3_VIC;
 };
 
+/* VIC is a place holder, and not actually stored */
 #define CEA_861_F_VIC_info_entry(VIC, columns, rows, HBlank, VBLank, \
 	FieldRate, image_aspect_ratio, scanmode, PixelAspectRatio, flags, \
 	clocksPerPelShift, AdditionalVBlank) \
@@ -853,7 +876,7 @@ uint32_t calculate_pixel_clock(struct edid_3d_data_t *mhl_edid_3d_data,
 	}
 
 	if (0 == VIC) {
-		
+		/* rule of thumb: */
 		vertical_active_period_in_microseconds =
 		    (vertical_sync_period_in_microseconds * 8) / 10;
 
@@ -862,7 +885,7 @@ uint32_t calculate_pixel_clock(struct edid_3d_data_t *mhl_edid_3d_data,
 		uint16_t v_blank_in_lines;
 
 		if (vsm_interlaced == VIC_info[VIC].fields.interlaced) {
-			
+			/* fix up these two values */
 			vertical_sync_frequency_in_milliHz /= 2;
 			vertical_sync_period_in_microseconds *= 2;
 			MHL_TX_EDID_INFO
@@ -871,12 +894,16 @@ uint32_t calculate_pixel_clock(struct edid_3d_data_t *mhl_edid_3d_data,
 			     vertical_sync_frequency_in_milliHz,
 			     vertical_sync_period_in_microseconds);
 
-			
+			/* proceed with calculations */
 			v_blank_in_lines =
 			    2 * VIC_info[VIC].v_blank_in_pixels +
 			    VIC_info[VIC].fields.field2_v_blank;
 
 		} else {
+			/* when multiple vertical blanking values present,
+			 * allow for higher clocks by calculating maximum
+			 * possible
+			 */
 			v_blank_in_lines =
 			    VIC_info[VIC].v_blank_in_pixels +
 			    VIC_info[VIC].fields.field2_v_blank;
@@ -890,7 +917,7 @@ uint32_t calculate_pixel_clock(struct edid_3d_data_t *mhl_edid_3d_data,
 	MHL_TX_EDID_INFO("vertical_active_period_in_microseconds: %u\n",
 			 vertical_active_period_in_microseconds);
 
-	
+	/* rigorous calculation: */
 	vertical_blank_period_in_microseconds =
 	    vertical_sync_period_in_microseconds -
 	    vertical_active_period_in_microseconds;
@@ -911,7 +938,7 @@ uint32_t calculate_pixel_clock(struct edid_3d_data_t *mhl_edid_3d_data,
 			 horizontal_sync_period_in_nanoseconds);
 
 	if (0 == VIC) {
-		
+		/* rule of thumb: */
 		horizontal_active_period_in_nanoseconds =
 		    (horizontal_sync_period_in_nanoseconds * 8) / 10;
 		MHL_TX_EDID_INFO
@@ -928,7 +955,7 @@ uint32_t calculate_pixel_clock(struct edid_3d_data_t *mhl_edid_3d_data,
 		    (horizontal_sync_period_in_nanoseconds * h_clocks) /
 		    h_total_in_pixels;
 	}
-	
+	/* rigorous calculation: */
 	horizontal_blank_period_in_nanoseconds =
 	    horizontal_sync_period_in_nanoseconds -
 	    horizontal_active_period_in_nanoseconds;
@@ -1016,6 +1043,15 @@ uint8_t qualify_pixel_clock_for_mhl(struct edid_3d_data_t *mhl_edid_3d_data,
 	return ret_val;
 }
 
+/*
+  is_MHL_timing_mode
+
+	MHL has a maximum link clock of 75Mhz.
+	For now, we use a rule of thumb regarding
+		blanking intervals to calculate a pixel clock,
+		then we convert it to a link clock and compare to 75MHz
+
+*/
 
 static uint8_t is_MHL_timing_mode(struct edid_3d_data_t *mhl_edid_3d_data,
 	uint16_t columns, uint16_t rows,
@@ -1090,8 +1126,8 @@ static void tx_prune_dtd_list(struct edid_3d_data_t *mhl_edid_3d_data,
 						*p_holder = p_desc,
 						*p_next_desc = p_desc + 1;
 					uint8_t j;
-					
-					
+					/* need to stop if this is the last one in the dtd list */
+					/* otherwise we will fall into a infinite loop because we keep copying the last one */
 					if (i >= limit - 1 - number_that_we_pruned) {
 						number_that_we_pruned++;
 						break;
@@ -1099,11 +1135,17 @@ static void tx_prune_dtd_list(struct edid_3d_data_t *mhl_edid_3d_data,
 					MHL_TX_DBG_INFO("pruning\n");
 					number_that_we_pruned++;
 					for (j = i + 1; j < limit; ++j) {
+						/* move the rest of the entries
+						 * one by one
+						 */
 						MHL_TX_EDID_INFO(
 						"p_desc:%p p_next_desc:%p\n",
 						p_desc, p_next_desc)
 						*p_desc++ = *p_next_desc++;
 					}
+					/* re-consider the new occupant of the
+					 * i'th entry on the next iteration
+					 */
 					i--;
 					p_desc = p_holder;
 				} else {
@@ -1130,6 +1172,21 @@ static void tx_prune_dtd_list(struct edid_3d_data_t *mhl_edid_3d_data,
 	}
 }
 
+/*
+ FUNCTION     :   si_mhl_tx_parse_detailed_timing_descriptor()
+ PURPOSE      :   Parse the detailed timing section of EDID Block 0 and
+				  print their decoded meaning to the screen.
+ INPUT PARAMS :   Pointer to the array where the data read from EDID
+				  Block0 is stored.
+		  Offset to the beginning of the Detailed Timing Descriptor
+				  data.
+		  Block indicator to distinguish between block #0 and blocks
+				  #2, #3
+
+ OUTPUT PARAMS:   None
+ GLOBALS USED :   None
+ RETURNS      :   true if valid timing, false if not
+*/
 
 static bool si_mhl_tx_parse_detailed_timing_descriptor(
 	struct edid_3d_data_t *mhl_edid_3d_data,
@@ -1144,7 +1201,13 @@ static bool si_mhl_tx_parse_detailed_timing_descriptor(
 	*p_is_timing = 0;
 	tmp_word =
 	    p_desc->dtd.pixel_clock_low + 256 * p_desc->dtd.pixel_clock_high;
+	/* 18 byte partition is used as either for Monitor Name or for Monitor
+	 * Range Limits or it is unused
+	 */
 	if (tmp_word == 0x00) {
+		/*  if called from Block #0 and first 2 bytes are 0 => either
+		 * Monitor Name or for Monitor Range Limits
+		 */
 		if (Block == EDID_BLOCK_0) {
 			if (0xFC == p_desc->name.data_type_tag) {
 				char monitor_name[14];
@@ -1159,7 +1222,7 @@ static bool si_mhl_tx_parse_detailed_timing_descriptor(
 			} else if (0xFD == p_desc->name.data_type_tag) {
 				MHL_TX_EDID_INFO("Monitor Range Limits:\n\n");
 
-				
+				/*i = 0;*/
 				MHL_TX_EDID_INFO(
 					"Min Vertical Rate in Hz: %d\n",
 					(int)p_desc->range_limits.
@@ -1189,12 +1252,19 @@ static bool si_mhl_tx_parse_detailed_timing_descriptor(
 				MHL_TX_EDID_INFO("\n");
 			}
 		} else if (Block == EDID_BLOCK_2_3) {
+			/* if called from block #2 or #3 and first 2 bytes are
+			 * 0x00 (padding) then this descriptor partition is not
+			 * used and parsing should be stopped
+			 */
 			MHL_TX_EDID_INFO
 			    ("No More Detailed descriptors in this block\n");
 			MHL_TX_EDID_INFO("\n");
 			return false;
 		}
 	} else {
+		/* first 2 bytes are not 0 => this is a detailed timing
+		 * descriptor from either block
+		 */
 		uint32_t pixel_clock_frequency;
 		uint16_t columns, rows, vertical_sync_period_in_lines;
 		uint32_t vertical_refresh_rate_in_milliHz,
@@ -1383,6 +1453,10 @@ static bool si_mhl_tx_parse_detailed_timing_descriptor(
 		}
 
 		if (!this_mode_doable) {
+			/*
+			 * Mark this mode for pruning by setting
+			 * horizontal active to zero
+			 */
 			MHL_TX_DBG_WARN("%smark for pruning%s %p\n",
 				ANSI_ESC_YELLOW_TEXT,
 				ANSI_ESC_RESET_TEXT,
@@ -1402,7 +1476,7 @@ static uint8_t si_mhl_tx_parse_861_long_descriptors(
 	struct CEA_extension_t *p_CEA_ext =
 		(struct CEA_extension_t *) p_EDID_block_data;
 
-	
+	/* per CEA-861-D, table 27 */
 	if (!p_CEA_ext->byte_offset_to_18_byte_descriptors) {
 		MHL_TX_DBG_ERR("EDID -> No Detailed Descriptors\n");
 		return EDID_NO_DETAILED_DESCRIPTORS;
@@ -1496,10 +1570,13 @@ static void prune_hdmi_vsdb_vic_list(
 			inner_loop_limit--;
 			outer_loop_limit--;
 		} else {
+			/* This mode is doable on MHL,
+			 * so move on to the next index
+			 */
 			++i;
 		}
 	}
-	
+	/* check the last one */
 	if (0 == mhl_edid_3d_data->parse_data.p_byte_13_through_byte_15->
 	    vicList[outer_loop_limit]) {
 		num_HDMI_VICs_pruned++;
@@ -1507,7 +1584,7 @@ static void prune_hdmi_vsdb_vic_list(
 	}
 
 	DUMP_EDID_BLOCK(0, p_CEA_extension, sizeof(*p_CEA_extension));
-	
+	/* now move all other data up */
 	if (num_HDMI_VICs_pruned) {
 		uint8_t *pb_dest = (uint8_t *) &mhl_edid_3d_data->parse_data.
 		    p_byte_13_through_byte_15->vicList[inner_loop_limit];
@@ -1586,6 +1663,9 @@ static void prune_svd_list(
 	uint8_t i, num_CEA_VICs_pruned = 0;
 	uint8_t *pb_limit = (uint8_t *)(p_CEA_extension + 1);
 
+	/*
+	   pack each vdb to eliminate the bytes that have been zeroed.
+	 */
 	int8_t vdb_index;
 	for (vdb_index = mhl_edid_3d_data->parse_data.num_video_data_blocks - 1;
 	     vdb_index >= 0; --vdb_index) {
@@ -1611,10 +1691,13 @@ static void prune_svd_list(
 					    (uint16_t)outer_loop_limit,
 					    (uint16_t)inner_loop_limit);
 				} else {
+					/* This mode is doable on MHL,
+					 * so move on to the next index.
+					 */
 					++i;
 				}
 			}
-			
+			/* check the last one */
 			if (0 == mhl_edid_3d_data->parse_data.
 			    p_video_data_blocks_2d[vdb_index]->
 			    short_descriptors[outer_loop_limit].VIC) {
@@ -1629,7 +1712,7 @@ static void prune_svd_list(
 			DUMP_EDID_BLOCK(0, p_CEA_extension,
 					sizeof(*p_CEA_extension));
 			{
-				
+				/* now move all other data up */
 				uint8_t *pb_dest =
 				    (uint8_t *) &mhl_edid_3d_data->
 				    parse_data.
@@ -1713,10 +1796,10 @@ static void si_mhl_tx_prune_edid(struct edid_3d_data_t *mhl_edid_3d_data)
 	} p_data_u;
 
 	if (EDID_EXTENSION_BLOCK_MAP == p_CEA_extension->tag) {
-		
+		/* save to overwrite later */
 		p_block_map = (struct block_map_t *) p_CEA_extension;
 
-		
+		/* advance to next block */
 		p_CEA_extension++;
 	}
 	pb_limit = (uint8_t *) (p_CEA_extension + 1);
@@ -1727,11 +1810,11 @@ static void si_mhl_tx_prune_edid(struct edid_3d_data_t *mhl_edid_3d_data)
 
 	DUMP_EDID_BLOCK(0, p_EDID_block_0, sizeof(*p_EDID_block_0));
 
-	
+	/* zero out checksums before modifying data */
 	p_CEA_extension->checksum = 0;
 	p_EDID_block_0->checksum = 0;
 
-	
+	/* Is there an HDMI VSDB? */
 	if (mhl_edid_3d_data->parse_data.p_HDMI_vsdb) {
 		struct HDMI_LLC_vsdb_payload_t *p_HDMI_vendor_specific_payload =
 		    &mhl_edid_3d_data->parse_data.p_HDMI_vsdb->payload_u.
@@ -1741,7 +1824,7 @@ static void si_mhl_tx_prune_edid(struct edid_3d_data_t *mhl_edid_3d_data)
 		    mhl_edid_3d_data->parse_data.p_HDMI_vsdb->header.fields.
 		    length_following_header;
 
-		
+		/* if deep color information is provided... */
 		if (((uint8_t *) &p_HDMI_vendor_specific_payload->byte6) <
 		    p_next_db) {
 			p_HDMI_vendor_specific_payload->byte6.DC_Y444 = 0;
@@ -1750,7 +1833,7 @@ static void si_mhl_tx_prune_edid(struct edid_3d_data_t *mhl_edid_3d_data)
 			p_HDMI_vendor_specific_payload->byte6.DC_48bit = 0;
 		}
 	}
-	
+	/* prune the DTDs in block 0 */
 	dtd_limit =
 	    sizeof(p_EDID_block_0->detailed_timing_descriptors) /
 	    sizeof(p_EDID_block_0->detailed_timing_descriptors[0]);
@@ -1760,7 +1843,7 @@ static void si_mhl_tx_prune_edid(struct edid_3d_data_t *mhl_edid_3d_data)
 	DUMP_EDID_BLOCK(0, p_EDID_block_0, sizeof(*p_EDID_block_0));
 	DUMP_EDID_BLOCK(0, p_CEA_extension, sizeof(*p_CEA_extension));
 
-	
+	/* prune the DTDs in the CEA-861D extension */
 #if 0
 	dtd_limit = (uint8_t) p_CEA_extension->version_u.version3.misc_support.
 		total_number_native_dtds_in_entire_EDID;
@@ -1773,7 +1856,7 @@ static void si_mhl_tx_prune_edid(struct edid_3d_data_t *mhl_edid_3d_data)
 	tx_prune_dtd_list(mhl_edid_3d_data,
 				 &p_data_u.p_long_descriptors[0], dtd_limit);
 	DUMP_EDID_BLOCK(0, p_CEA_extension, sizeof(*p_CEA_extension));
-	
+	/* adjust the mask according to which 2D VICs were set to zero */
 	if (mhl_edid_3d_data->parse_data.p_3d_mask) {
 		uint8_t lower_mask;
 		uint32_t mask32;
@@ -1796,17 +1879,17 @@ static void si_mhl_tx_prune_edid(struct edid_3d_data_t *mhl_edid_3d_data)
 				uint8_t upper_mask;
 				upper_mask = (uint8_t) mask32;
 
-				
+				/* preserve the lower bits */
 				lower_bits =
 				    lower_mask & mhl_edid_3d_data->parse_data.
 				    p_3d_mask->_3D_mask_15_8;
 
-				
+				/* and out the bit in question */
 				upper_bits =
 				    upper_mask & mhl_edid_3d_data->parse_data.
 				    p_3d_mask->_3D_mask_15_8;
 
-				
+				/* adjust the positions of the upper bits */
 				upper_bits >>= 1;
 
 				mhl_edid_3d_data->parse_data.p_3d_mask->
@@ -1829,17 +1912,17 @@ static void si_mhl_tx_prune_edid(struct edid_3d_data_t *mhl_edid_3d_data)
 				uint8_t upper_mask;
 				upper_mask = (uint8_t) mask32;
 
-				
+				/* preserve the lower bits */
 				lower_bits =
 				    lower_mask & mhl_edid_3d_data->parse_data.
 				    p_3d_mask->_3D_mask_7_0;
 
-				
+				/* AND out the bit in question */
 				upper_bits =
 				    upper_mask & mhl_edid_3d_data->parse_data.
 				    p_3d_mask->_3D_mask_7_0;
 
-				
+				/* adjust the positions of the upper bits */
 				upper_bits >>= 1;
 
 				mhl_edid_3d_data->parse_data.p_3d_mask->
@@ -1866,6 +1949,10 @@ static void si_mhl_tx_prune_edid(struct edid_3d_data_t *mhl_edid_3d_data)
 		uint8_t limit_2D_VIC =
 		    mhl_edid_3d_data->parse_data.p_video_data_blocks_2d[0]->
 		    header.fields.length_following_header;
+		/*
+		 * Prior to moving things around, make a bitmap of
+		 * the positions of the VICs that are zero
+		 */
 		{
 			uint8_t i;
 			uint32_t this_bit;
@@ -1877,6 +1964,9 @@ static void si_mhl_tx_prune_edid(struct edid_3d_data_t *mhl_edid_3d_data)
 				    p_video_data_blocks_2d[0]->
 				    short_descriptors[i].VIC;
 				if (0 == VIC) {
+					/* set the bit that corresponds to the
+					 * VIC that was set to zero
+					 */
 					deletion_mask |= this_bit;
 					MHL_TX_EDID_INFO
 					    ("vic: 0x%02x deletion_mask:0x%08x"
@@ -1899,7 +1989,7 @@ static void si_mhl_tx_prune_edid(struct edid_3d_data_t *mhl_edid_3d_data)
 			    p_video_data_blocks_2d[0]->
 			    short_descriptors[_2D_VIC_order].VIC;
 			if (0 == VIC) {
-				
+				/* delete this 3D_Structure/3D_detail info */
 				uint8_t *pSrc, *pDest = p_3D_u.p_as_bytes;
 
 				if (_3D_structure < tdsSideBySide) {
@@ -1984,7 +2074,7 @@ static void si_mhl_tx_prune_edid(struct edid_3d_data_t *mhl_edid_3d_data)
 				   p_HDMI_vsdb->header)) : 0
 		    );
 	}
-	
+	/* Prune the HDMI VSDB VIC list */
 	if (mhl_edid_3d_data->parse_data.p_byte_13_through_byte_15) {
 		uint8_t length_VIC =
 		    mhl_edid_3d_data->parse_data.p_byte_13_through_byte_15->
@@ -1999,10 +2089,10 @@ static void si_mhl_tx_prune_edid(struct edid_3d_data_t *mhl_edid_3d_data)
 		}
 	}
 
-	
+	/* Prune the SVD list and move the CEA 861-D data blocks and DTDs up */
 	prune_svd_list(mhl_edid_3d_data, p_CEA_extension);
 
-	
+	/* re-compute the checksum(s) */
 	SII_ASSERT(EDID_BLOCK_SIZE == sizeof(*p_EDID_block_0),
 		("\n\n unexpected size for block 0\n\n"));
 	SII_ASSERT(EDID_BLOCK_SIZE == sizeof(*p_CEA_extension),
@@ -2027,6 +2117,10 @@ static void si_mhl_tx_prune_edid(struct edid_3d_data_t *mhl_edid_3d_data)
 	DUMP_EDID_BLOCK(0, p_EDID_block_0, sizeof(*p_EDID_block_0));
 	DUMP_EDID_BLOCK(0, p_CEA_extension, sizeof(*p_CEA_extension));
 
+	/*
+	 * TODO: adjust all pointers into the EDID along the way of pruning the
+	 * contents, instead of re-parsing here
+	 */
 #ifndef EDID_PASSTHROUGH
 	if (0 == si_mhl_tx_drv_set_upstream_edid(mhl_edid_3d_data->drv_context,
 		mhl_edid_3d_data->EDID_block_data, 2 * EDID_BLOCK_SIZE))
@@ -2036,6 +2130,8 @@ static void si_mhl_tx_prune_edid(struct edid_3d_data_t *mhl_edid_3d_data)
 	}
 }
 
+/*
+*/
 static uint8_t IsQualifiedMhlVIC(struct edid_3d_data_t *mhl_edid_3d_data,
 	uint8_t VIC, uint16_t burst_id,
 	union video_burst_descriptor_u *p_descriptor)
@@ -2051,27 +2147,27 @@ static uint8_t IsQualifiedMhlVIC(struct edid_3d_data_t *mhl_edid_3d_data,
 			VIC_info[VIC].fields.frame_rate_info) {
 			uint32_t field_rate_in_milliHz;
 			switch (VIC_info[VIC].field_rate_in_milliHz) {
-			case 24000:	
+			case 24000:	/* 23.97 */
 				field_rate_in_milliHz = 23970;
 				break;
 
-			case 30000:	
+			case 30000:	/* 29.97 */
 				field_rate_in_milliHz = 29970;
 				break;
 
-			case 60000:	
+			case 60000:	/* 59.94 */
 				field_rate_in_milliHz = 59940;
 				break;
 
-			case 120000:	
+			case 120000:	/* 119.88 */
 				field_rate_in_milliHz = 119880;
 				break;
 
-			case 240000:	
+			case 240000:	/* 239.76 */
 				field_rate_in_milliHz = 239760;
 				break;
 
-			default:	
+			default:	/* error or unknown case */
 				field_rate_in_milliHz = 0;
 				break;
 			}
@@ -2086,6 +2182,7 @@ static uint8_t IsQualifiedMhlVIC(struct edid_3d_data_t *mhl_edid_3d_data,
 	return ret_val;
 }
 
+/* HDMI_VIC is a place holder, and not actually stored */
 #define HDMI_VIC(HDMI_VIC, cols, rows, field0, field1, pclk0, pclk1, mhl_vic) \
 	{cols, rows, field0, field1, pclk0, pclk1, mhl_vic}
 
@@ -2097,6 +2194,8 @@ PLACE_IN_CODE_SEG struct HDMI_VIC_info_t hdmi_vic_info[] = {
 	HDMI_VIC(4, 4096, 2160, 24000, 24000, 297000000, 297000000, 98)
 };
 
+/*
+*/
 static uint8_t is_qualified_mhl_hdmi_vic(
 	struct edid_3d_data_t *mhl_edid_3d_data, uint8_t VIC)
 {
@@ -2194,7 +2293,7 @@ void si_mhl_tx_enumerate_hdmi_vsdb(struct edid_3d_data_t *mhl_edid_3d_data)
 		p_next_db)
 		return;
 
-	
+	/*  HDMI_VIC_len is present... */
 	length_VIC = mhl_edid_3d_data->
 		parse_data.p_byte_13_through_byte_15->byte14.HDMI_VIC_len;
 	for (index = 0; index < length_VIC; ++index) {
@@ -2226,11 +2325,19 @@ void si_mhl_tx_enumerate_hdmi_vsdb(struct edid_3d_data_t *mhl_edid_3d_data)
 	limit = (limit > 16) ? 16 : limit;
 	switch (hdmi_3D_multi_present) {
 	case 0x00:
+		/* 3D_Structure_ALL_15..0 and 3D_MASK_15..0
+		 * fields are not present
+		 * */
 		p_3D_u.p_3D = &pThree3DSubBlock->
 			HDMI_3D_sub_block_sans_all_AND_mask.
 			_3D_structure_and_detail_list[0];
 		break;
 	case 0x01:
+		/*
+		 * 3D_Structure_ALL_15..0 is present and assigns 3D formats
+		 * to all of the VICs listed in the first 16 entries in the
+		 * EDID 3D_mask_15..0 is not present
+		 */
 		{
 			union video_burst_descriptor_u descriptor;
 			struct _3D_structure_all_t *p_3D_structure_all =
@@ -2279,6 +2386,12 @@ void si_mhl_tx_enumerate_hdmi_vsdb(struct edid_3d_data_t *mhl_edid_3d_data)
 			_3D_structure_and_detail_list[0];
 		break;
 	case 0x02:
+		/*
+		   3D_Structure_ALL_15..0 and 3D_mask_15..0 are present and
+		   assign 3D formats to some of the VICS listed in the first
+		   16 entries in the EDID
+
+		 */
 	{
 		struct _3D_structure_all_t *p_3D_structure_all =
 			(struct _3D_structure_all_t *)&mhl_edid_3d_data->
@@ -2369,6 +2482,10 @@ void si_mhl_tx_enumerate_hdmi_vsdb(struct edid_3d_data_t *mhl_edid_3d_data)
 			HDMI_3D_sub_block_with_all_AND_mask._3D_mask;
 		break;
 	case 0x03:
+		/*
+		 * Reserved for future use.
+		 * 3D_Structure_ALL_15..0 and 3D_mask_15..0 are NOT present
+		 */
 		p_3D_u.p_3D = &pThree3DSubBlock->
 			HDMI_3D_sub_block_sans_all_AND_mask.
 			_3D_structure_and_detail_list[0];
@@ -2391,7 +2508,7 @@ void si_mhl_tx_enumerate_hdmi_vsdb(struct edid_3d_data_t *mhl_edid_3d_data)
 			parse_data.p_video_data_blocks_2d[vdb_index]->
 			short_descriptors[_2D_VIC_order].VIC;
 
-		
+		/* this VIC position might have gotten disqualified already */
 		if (VIC) {
 			union video_burst_descriptor_u descriptor;
 			descriptor.mhl2_3d_descriptor.left_right = 0;
@@ -2400,6 +2517,9 @@ void si_mhl_tx_enumerate_hdmi_vsdb(struct edid_3d_data_t *mhl_edid_3d_data)
 			switch (_3D_structure) {
 			case tdsSideBySide:
 				{
+					/*TODO: re-visit uint8_t _3D_detail =
+					 * p_3D_u.pwith_byte1->byte1._3D_detail;
+					 */
 					descriptor.mhl2_3d_descriptor.
 						left_right = 1;
 				}
@@ -2435,9 +2555,9 @@ void si_mhl_tx_display_timing_enumeration_end(
 	struct edid_3d_data_t *mhl_edid_3d_data)
 {
 	mhl_edid_3d_data->parse_data.flags.parse_3d_in_progress = 0;
-	
+	/* finish off with any 3D modes reported via the HDMI VSDB */
 	si_mhl_tx_enumerate_hdmi_vsdb(mhl_edid_3d_data);
-	
+	/* notify the app (board specific) layer */
 	display_timing_enumeration_end(mhl_edid_3d_data);
 	SET_3D_FLAG(mhl_edid_3d_data, FLAGS_BURST_3D_DONE);
 	si_mhl_tx_prune_edid(mhl_edid_3d_data);
@@ -2449,6 +2569,9 @@ static void CheckForAll3DBurstDone(struct edid_3d_data_t *mhl_edid_3d_data)
 		if (TEST_3D_FLAG(mhl_edid_3d_data, FLAGS_BURST_3D_DTD_DONE)) {
 			if (!TEST_3D_FLAG
 			    (mhl_edid_3d_data, FLAGS_BURST_3D_DONE)) {
+				/* For MHL 3.0 and newer peers,
+				 * we wait for MHL_INT_FEAT_COMPLETE
+				 */
 				if (si_get_peer_mhl_version
 				    (mhl_edid_3d_data->dev_context) < 0x30) {
 					si_mhl_tx_display_timing_enumeration_end
@@ -2459,11 +2582,18 @@ static void CheckForAll3DBurstDone(struct edid_3d_data_t *mhl_edid_3d_data)
 	}
 }
 
+/*
+*/
 void si_mhl_tx_process_3d_vic_burst(void *context,
 	struct MHL2_video_format_data_t *p_write_burst_data)
 {
 	struct edid_3d_data_t *mhl_edid_3d_data;
 	uint8_t block_index = 0;
+	/*
+	 * TODO: re-visit uint8_t edidLimit =
+	 * mhl_edid_3d_data->parse_data.p_byte_13_through_byte_15->
+	 * byte14.HDMI_3D_len;
+	 */
 	mhl_edid_3d_data = (struct edid_3d_data_t *)context;
 
 	MHL_TX_EDID_INFO("burstEntryCount3D_VIC: %d\n",
@@ -2505,7 +2635,7 @@ void si_mhl_tx_process_3d_vic_burst(void *context,
 		return;
 	}
 	if (mhl_edid_3d_data->parse_data.flags.parse_3d_in_progress) {
-		
+		/* check to see if it's time to move on to the next block */
 		if (mhl_edid_3d_data->parse_data.vic_2d_index >=
 		    mhl_edid_3d_data->parse_data.
 		    p_video_data_blocks_2d[mhl_edid_3d_data->parse_data.
@@ -2528,12 +2658,12 @@ void si_mhl_tx_process_3d_vic_burst(void *context,
 		    p_video_data_blocks_2d[mhl_edid_3d_data->parse_data.
 					   video_data_block_index]->header.
 		    fields.length_following_header) {
-			
+			/* each SVD is 1 byte long */
 			DUMP_EDID_BLOCK(0,
 				(struct CEA_extension_t *)&mhl_edid_3d_data->
 				EDID_block_data[EDID_BLOCK_SIZE],
 				EDID_BLOCK_SIZE);
-			
+			/* block_index is set to zero above */
 			for (; (block_index <
 					 p_write_burst_data->
 					 num_entries_this_burst)
@@ -2550,6 +2680,10 @@ void si_mhl_tx_process_3d_vic_burst(void *context,
 				struct cea_short_descriptor_t svd;
 				uint8_t this_mode_doable = 0;
 				union video_burst_descriptor_u *p_descriptor;
+				/*
+				 * Check to see if it's time to move on
+				 * to the next block
+				 */
 				if (mhl_edid_3d_data->parse_data.vic_2d_index >=
 				    mhl_edid_3d_data->parse_data.
 				    p_video_data_blocks_2d[mhl_edid_3d_data->
@@ -2656,6 +2790,10 @@ void check_3d_dtd_sequence_done(struct edid_3d_data_t *mhl_edid_3d_data,
 			FLAGS_BURST_3D_VIC_DONE)) {
 			if (!TEST_3D_FLAG(mhl_edid_3d_data,
 				FLAGS_BURST_3D_DONE)) {
+				/*
+				 * For MHL 3.0 and newer peers, wait for
+				 * MHL_INT_FEAT_COMPLETE
+				 */
 				if (si_get_peer_mhl_version(
 					mhl_edid_3d_data->dev_context) < 0x30) {
 					si_mhl_tx_display_timing_enumeration_end
@@ -2708,8 +2846,8 @@ static void process_cea_dtds(struct edid_3d_data_t *mhl_edid_3d_data,
 			 total_entries, dtd_limit,
 			 p_CEA_extension->
 			 byte_offset_to_18_byte_descriptors);
-	
-	
+	/* continue with CEA-861-D/E DTDs when done with VESA DTDs */
+	/* burst_index is set to zero above */
 	for (; (burst_index <
 		     p_write_burst_data->num_entries_this_burst)
 		    && (mhl_edid_3d_data->parse_data.
@@ -2734,7 +2872,7 @@ static void process_cea_dtds(struct edid_3d_data_t *mhl_edid_3d_data,
 		    si_mhl_tx_parse_detailed_timing_descriptor
 		    (mhl_edid_3d_data, p_desc, EDID_BLOCK_2_3,
 		     &is_timing, burst_id_3D_DTD, p_burst_desc);
-		
+		/* only count it if it's a valid timing */
 		if (is_timing) {
 
 			if (is_valid) {
@@ -2766,6 +2904,10 @@ static void process_cea_dtds(struct edid_3d_data_t *mhl_edid_3d_data,
 				     cea_861_dtd_index]._3d_info =
 				    p_burst_desc->mhl3_3d_descriptor;
 			} else {
+				/*
+				 * Mark this mode for pruning by setting
+				 * horizontal active to zero
+				 */
 				MHL_TX_DBG_INFO("%smark for pruning%s\n",
 					ANSI_ESC_YELLOW_TEXT,
 					ANSI_ESC_RESET_TEXT);
@@ -2879,6 +3021,10 @@ void si_mhl_tx_process_3d_dtd_burst(void *context,
 
 	p_EDID_block_0 = (struct EDID_block0_t *)&mhl_edid_3d_data->
 		EDID_block_data[0];
+	/*
+	 * Up to four DTDs are possible in the base VESA EDID
+	 * this will be covered by a single burst.
+	 */
 #define DESC_COUNT	(sizeof(p_EDID_block_0->detailed_timing_descriptors) / \
 			sizeof(p_EDID_block_0->detailed_timing_descriptors[0]))
 
@@ -2920,6 +3066,10 @@ void si_mhl_tx_process_3d_dtd_burst(void *context,
 				MHL_TX_DBG_INFO("%smark for pruning%s\n",
 					ANSI_ESC_YELLOW_TEXT,
 					ANSI_ESC_RESET_TEXT);
+				/*
+				 * Mark this mode for pruning by setting
+				 * horizontal active to zero
+				 */
 				p_desc->dtd.horz_active_7_0 = 0;
 				p_desc->dtd.horz_active_blanking_high.
 					horz_active_11_8 = 0;
@@ -2939,14 +3089,14 @@ void si_mhl_tx_process_3d_dtd_burst(void *context,
 		   detailed_timing_descriptors) /
 	    sizeof(p_EDID_block_0->
 		   detailed_timing_descriptors[0])) {
-		
+		/* we got past the VESA DTDs in this burst */
 		SET_3D_FLAG(mhl_edid_3d_data,
 			    FLAGS_BURST_3D_DTD_VESA_DONE);
 	} else {
 		check_3d_dtd_sequence_done(mhl_edid_3d_data,
 					   p_write_burst_data,
 					   dtd_limit);
-		
+		/* more VESA DTDs to process in next burst */
 		MHL_TX_EDID_INFO(
 			"%s\n",
 			TEST_3D_FLAG(mhl_edid_3d_data,
@@ -3011,6 +3161,9 @@ void si_mhl_tx_process_hev_vic_burst(struct edid_3d_data_t *mhl_edid_3d_data,
 	for (i = 0; (i < p_burst->num_entries_this_burst) &&
 			(hev_index < p_burst->header.total_entries);
 				++i, ++hev_index) {
+		/* We don't have an EDID entry to prune here, so just
+		   throw away the return value
+		 */
 
 		if (IsQualifiedMhlVIC
 		    (mhl_edid_3d_data,
@@ -3094,11 +3247,21 @@ void si_mhl_tx_process_hev_dtd_b_burst(struct edid_3d_data_t *mhl_edid_3d_data,
 			    p_burst->payload;
 		}
 	}
-	
+	/* no EDID to prune here, so throw away the result */
 	is_MHL_timing_mode(mhl_edid_3d_data, 0, 0, 0, burst_id_HEV_DTDB,
 			   (union video_burst_descriptor_u *) p_burst, 0);
 }
 
+/*
+ FUNCTION     :   si_mhl_tx_parse_established_timing()
+ PURPOSE      :   Parse the established timing section of EDID Block 0 and
+				  print their decoded meaning to the screen.
+ INPUT PARAMS :   Pointer to the array where the data read from EDID
+				  Block0 is stored.
+ OUTPUT PARAMS:   None
+ GLOBALS USED :   None
+ RETURNS      :   Void
+*/
 
 #define STRINGIZE(x) #x
 
@@ -3145,14 +3308,14 @@ static void si_mhl_tx_parse_established_timing(
 	DUMP_OFFSET(struct EDID_block0_t, white_x);
 	DUMP_OFFSET(struct EDID_block0_t, white_y);
 
-	
+	/* MHL cannot support these modes, so prune them */
 	p_EDID_block_0->established_timings_II.et1280x1024_75p = 0;
 	p_EDID_block_0->manufacturers_timings.et1152x870_75p = 0;
 
 	MHL_TX_EDID_INFO("Parsing Established Timing:\n");
 	MHL_TX_EDID_INFO("===========================\n");
 
-	
+	/* Parse Established Timing Byte #0 */
 	DUMP_OFFSET(struct EDID_block0_t, established_timings_I);
 	DUMP_ESTABLISHED_TIMING(established_timings_I, 720, 400, 70, p)
 	DUMP_ESTABLISHED_TIMING(established_timings_I, 720, 400, 88, p)
@@ -3163,7 +3326,7 @@ static void si_mhl_tx_parse_established_timing(
 	DUMP_ESTABLISHED_TIMING(established_timings_I, 800, 600, 56, p)
 	DUMP_ESTABLISHED_TIMING(established_timings_I, 800, 600, 60, p)
 
-	
+	/* Parse Established Timing Byte #1: */
 	DUMP_OFFSET(struct EDID_block0_t, established_timings_II);
 	DUMP_ESTABLISHED_TIMING(established_timings_II, 800, 600, 72, p)
 	DUMP_ESTABLISHED_TIMING(established_timings_II, 800, 600, 75, p)
@@ -3174,7 +3337,7 @@ static void si_mhl_tx_parse_established_timing(
 	DUMP_ESTABLISHED_TIMING(established_timings_II, 1024, 768, 75, p)
 	DUMP_ESTABLISHED_TIMING(established_timings_II, 1280, 1024, 75, p)
 
-	
+	/* Parse Established Timing Byte #2: */
 	DUMP_OFFSET(struct EDID_block0_t, manufacturers_timings);
 	DUMP_ESTABLISHED_TIMING(manufacturers_timings, 1152, 870, 75, p)
 
@@ -3185,6 +3348,16 @@ static void si_mhl_tx_parse_established_timing(
 	}
 }
 
+/*
+ FUNCTION     :   si_mhl_tx_parse_standard_timing()
+ PURPOSE      :   Parse the standard timing section of EDID Block 0 and
+				  print their decoded meaning to the screen.
+ INPUT PARAMS :   Pointer to the array where the data read from EDID
+				  Block0 is stored.
+ OUTPUT PARAMS:   None
+ GLOBALS USED :   None
+ RETURNS      :   Void
+*/
 
 static void si_mhl_tx_parse_standard_timing(
 	struct edid_3d_data_t *mhl_edid_3d_data,
@@ -3209,6 +3382,9 @@ static void si_mhl_tx_parse_standard_timing(
 		    && (0 ==
 			p_EDID_block_0->standard_timings[i].image_aspect_ratio)
 		    ) {
+			/* per VESA EDID standard, Release A, Revision 1,
+			 * February 9, 2000, Sec. 3.9
+			 */
 			MHL_TX_EDID_INFO("Standard Timing Undefined\n");
 		} else {
 			uint16_t horz_active =
@@ -3221,6 +3397,9 @@ static void si_mhl_tx_parse_standard_timing(
 					60) * 1000;
 			char *psz_ratio_string = "";
 
+			/* per VESA EDID standard, Release A, Revision 1,
+			 * February 9, 2000, Table 3.15
+			 */
 			AR_code =
 			    p_EDID_block_0->standard_timings[i].
 			    image_aspect_ratio;
@@ -3254,7 +3433,7 @@ static void si_mhl_tx_parse_standard_timing(
 			if (!is_MHL_timing_mode
 			    (mhl_edid_3d_data, horz_active, vert_active,
 			     refresh_rate_in_milliHz, 0, NULL, 0)) {
-				
+				/* disable this mode */
 				p_EDID_block_0->standard_timings[i].
 				    horz_pix_div_8_minus_31 = 1;
 				p_EDID_block_0->standard_timings[i].
@@ -3267,6 +3446,16 @@ static void si_mhl_tx_parse_standard_timing(
 	}
 }
 
+/*
+ FUNCTION     :   si_mhl_tx_parse_block_zero_timing_descriptors()
+ PURPOSE      :   Parse EDID Block 0 timing descriptors per EEDID 1.3
+				  standard. printf() values to screen.
+ INPUT PARAMS :   Pointer to the 128 byte array where the data read from EDID
+				  Block0 is stored.
+ OUTPUT PARAMS:   None
+ GLOBALS USED :   None
+ RETURNS      :   Void
+*/
 
 static void si_mhl_tx_parse_block_zero_timing_descriptors(
 	struct edid_3d_data_t *mhl_edid_3d_data,
@@ -3293,6 +3482,16 @@ static void si_mhl_tx_parse_block_zero_timing_descriptors(
 	}
 }
 
+/*
+ FUNCTION     :   bool si_mhl_tx_do_edid_checksum()
+ PURPOSE      :   Calculte checksum of the 128 byte block pointed to by the
+				  pointer passed as parameter
+ INPUT PARAMS :   Pointer to a 128 byte block whose checksum needs to be
+				  calculated
+ OUTPUT PARAMS:   None
+ GLOBALS USED :   None
+ RETURNS      :   true if chcksum is 0. false if not.
+*/
 
 static bool si_mhl_tx_do_edid_checksum(uint8_t *p_EDID_block_data)
 {
@@ -3308,6 +3507,10 @@ static bool si_mhl_tx_do_edid_checksum(uint8_t *p_EDID_block_data)
 	return true;
 }
 
+/*
+ * Checks if EDID header is correct per VESA E-EDID standard
+ * Must be 00 FF FF FF FF FF FF 00
+ */
 
 #define EDID_OFFSET_HEADER_FIRST_00	0x00
 #define EDID_OFFSET_HEADER_FIRST_FF	0x01
@@ -3353,18 +3556,23 @@ bool si_mhl_tx_check_edid_header(struct edid_3d_data_t *mhl_edid_3d_data,
 void SiiMhlTxMakeItDVI(struct edid_3d_data_t *mhl_edid_3d_data,
 	struct EDID_block0_t *p_EDID_block_0)
 {
-	
+	/* Make it DVI */
 	mhl_edid_3d_data->parse_data.HDMI_sink = false;
 #ifdef MHL3_DVI_SUPPORT_FORCE_HDMI
 	if (si_mhl_tx_drv_connection_is_mhl3(mhl_edid_3d_data->dev_context)) {
+		/*
+		  MHL3 connections always require infoframes
+			So present an EDID that indicates HDMI
+			so that our upstream sink will send infoframes
+		*/
 
 		uint8_t hdmi_proxy_edid_block1[EDID_BLOCK_SIZE] = {
 			0x02, 0x03, 0x19, 0x70,
 			(DBTC_VIDEO_DATA_BLOCK << 5) | 0x0B,
-				0x01, 
-				0x03, 
+				0x01, /* */
+				0x03, /* 1280x720p60 */
 				0x04,
-				0x05, 
+				0x05, /* 1920x1080i60 */
 				0x90,
 				0x20,
 				0x11,
@@ -3373,7 +3581,7 @@ void SiiMhlTxMakeItDVI(struct edid_3d_data_t *mhl_edid_3d_data,
 				0x14,
 				0x1f,
 			(DBTC_VENDOR_SPECIFIC_DATA_BLOCK << 5) | 0x08,
-				0x03, 0x0C, 0x00, 
+				0x03, 0x0C, 0x00, /* HDMI LLC */
 				0x10, 0x00, 0x00, 0x2D, 0x00,
 
 			      0x00, 0x00, 0x00,
@@ -3426,7 +3634,7 @@ void SiiMhlTxMakeItDVI(struct edid_3d_data_t *mhl_edid_3d_data,
 
 		p_EDID_block_0->extension_flag = 0;
 
-		
+		/* blank out the second block of the upstream EDID */
 		MHL_TX_DBG_INFO("DVI EDID ...Setting second block to 0xFF %d\n",
 				(uint16_t) EDID_REV_ADDR_ERROR);
 		p_EDID_block_data += EDID_BLOCK_SIZE;
@@ -3455,7 +3663,7 @@ static void SiiMhlTx3dReq(struct edid_3d_data_t *mhl_edid_3d_data)
 			    parse_3d_in_progress = 1;
 			hw_context->callbacks.display_timing_enum_begin(
 				hw_context->callbacks.context);
-			
+			/* tell sink to begin sending 3D, etc. write bursts */
 			si_mhl_tx_send_3d_req_or_feat_req(mhl_edid_3d_data->
 							  dev_context);
 
@@ -3496,7 +3704,7 @@ static void SiiMhlTx3dReq(struct edid_3d_data_t *mhl_edid_3d_data)
 		struct EDID_block0_t *p_EDID_block_0 = (struct EDID_block0_t *)
 			&mhl_edid_3d_data->EDID_block_data[0];
 		uint8_t dtd_limit;
-		
+		/* prune the DTDs in block 0 for DVI sinks */
 		dtd_limit =
 		    sizeof(p_EDID_block_0->detailed_timing_descriptors) /
 		    sizeof(p_EDID_block_0->detailed_timing_descriptors[0]);
@@ -3565,11 +3773,11 @@ static uint8_t parse_861_short_descriptors(
 		return EDID_REV_ADDR_ERROR;
 	}
 
-	
+	/* block offset where long descriptors start */
 	puc_long_descriptors = ((uint8_t *) p_CEA_extension) +
 	    p_CEA_extension->byte_offset_to_18_byte_descriptors;
 
-	
+	/* byte #3 of CEA extension version 3 */
 	mhl_edid_3d_data->parse_data.underscan =
 	    p_CEA_extension_version_3->misc_support.
 	    underscan_IT_formats_by_default ? 1 : 0;
@@ -3602,7 +3810,7 @@ static uint8_t parse_861_short_descriptors(
 			return EDID_V_DESCR_OVERFLOW;
 		}
 
-		
+		/* num of short video descriptors in this data block */
 		i = 0;
 		switch (tag_code) {
 		case DBTC_VIDEO_DATA_BLOCK:
@@ -3617,7 +3825,7 @@ static uint8_t parse_861_short_descriptors(
 				    (struct video_data_block_t *)
 				    p_data_u.puc_data_block;
 
-				
+				/* each SVD is 1 byte long */
 				while (i < data_block_length) {
 					uint8_t VIC;
 					VIC =
@@ -3755,14 +3963,14 @@ static uint8_t parse_861_short_descriptors(
 					   ("unexpected data_block_length\n"));
 				mhl_edid_3d_data->parse_data.HDMI_sink = true;
 
-				
+				/* CEC Physical address */
 				*((struct HDMI_LLC_BA_t *)
 					&mhl_edid_3d_data->parse_data.CEC_A_B) =
 							p_HDMI_vs_payload->B_A;
 				*((struct HDMI_LLC_DC_t *)
 				  &mhl_edid_3d_data->parse_data.CEC_C_D) =
 						  p_HDMI_vs_payload->D_C;
-				
+				/* Offset of 3D_Present bit in VSDB */
 				if (p_HDMI_vs_payload->byte8.
 						latency_fields_present) {
 					if (p_HDMI_vs_payload->byte8.
@@ -3861,7 +4069,7 @@ static uint8_t parse_861_block(struct edid_3d_data_t *mhl_edid_3d_data,
 		p_block_map = (struct block_map_t *) p_EDID_block_data;
 
 		MHL_TX_EDID_INFO("Edid: Block Map\n");
-		
+		/* loop limit is adjusted by one to account for block map */
 		for (i = 0;
 		     i < mhl_edid_3d_data->parse_data.num_EDID_extensions - 1;
 		     ++i) {
@@ -3887,7 +4095,7 @@ static uint8_t parse_861_block(struct edid_3d_data_t *mhl_edid_3d_data,
 			return err_code;
 		}
 
-		
+		/* adjust */
 		err_code =
 		    si_mhl_tx_parse_861_long_descriptors(mhl_edid_3d_data,
 							 p_EDID_block_data);
@@ -3912,10 +4120,10 @@ void si_mhl_tx_handle_atomic_hw_edid_read_complete(
 					mhl_edid_3d_data->EDID_block_data,
 					2 * EDID_BLOCK_SIZE);
 #endif
-	
+	/* assume DVI until we encounter an HDMI VSDB */
 	mhl_edid_3d_data->parse_data.HDMI_sink = false;
 
-	
+	/* Parse EDID Block #0 Desctiptors */
 	si_mhl_tx_parse_block_zero_timing_descriptors(mhl_edid_3d_data,
 						      p_EDID_block_0);
 
@@ -3925,7 +4133,7 @@ void si_mhl_tx_handle_atomic_hw_edid_read_complete(
 	mhl_edid_3d_data->parse_data.num_EDID_extensions =
 	    p_EDID_block_0->extension_flag;
 	if (0 == p_EDID_block_0->extension_flag) {
-		
+		/* No extensions to worry about */
 		DUMP_EDID_BLOCK(0, (uint8_t *) p_EDID_block_0, EDID_BLOCK_SIZE);
 		    MHL_TX_DBG_ERR
 		    ("EDID -> no extensions, assuming DVI. tag offset:0x%lx\n",
@@ -3934,7 +4142,7 @@ void si_mhl_tx_handle_atomic_hw_edid_read_complete(
 	} else {
 		uint8_t Result = EDID_OK;
 		MHL_TX_EDID_INFO(" tag:place holder\n");
-		
+		/* number of extensions is one less than number of blocks */
 		for (counter = 1;
 		     counter <=
 		     mhl_edid_3d_data->parse_data.num_EDID_extensions;
@@ -3959,6 +4167,10 @@ void si_mhl_tx_handle_atomic_hw_edid_read_complete(
 			}
 		}
 	}
+	/*
+	 * Since our working copy of the block zero EDID gets modified,
+	 *              we must re-compute its checksum
+	 */
 	p_EDID_block_0->checksum = 0;
 	p_EDID_block_0->checksum =
 	    calculate_generic_checksum((uint8_t *) p_EDID_block_0, 0,
@@ -3989,6 +4201,9 @@ static void handle_emsc_edid_complete(
 		si_mhl_tx_handle_atomic_hw_edid_read_complete(mhl_edid_3d_data);
 	}
 }
+/*
+		EXPORTED FUNCTIONS
+*/
 
 void si_mhl_tx_initiate_edid_sequence(struct edid_3d_data_t *mhl_edid_3d_data)
 {
@@ -4001,6 +4216,10 @@ void si_mhl_tx_initiate_edid_sequence(struct edid_3d_data_t *mhl_edid_3d_data)
 			handle_emsc_edid_complete(mhl_edid_3d_data);
 		} else {
 			MHL_TX_DBG_WARN("normative EDID\n")
+			/*
+			   Initiate the EDID reading sequence see
+			   SiiMhlTxMscCommandDone for additional processing.
+			 */
 
 			si_edid_reset(mhl_edid_3d_data);
 			si_mhl_tx_request_first_edid_block(mhl_edid_3d_data->
@@ -4194,7 +4413,7 @@ int si_edid_find_pixel_clock_from_AVI_VIC(void *context, uint8_t vic)
 uint32_t si_edid_find_pixel_clock_from_HEV_DTD(
 	struct edid_3d_data_t *mhl_edid_3d_data, struct MHL_high_low_t hev_fmt)
 {
-	
+	/* SEQ numbers start at one */
 	uint16_t index = ENDIAN_CONVERT_16(hev_fmt) - 16384 - 1;
 	if (NULL == mhl_edid_3d_data->hev_dtd_list) {
 		MHL_TX_DBG_ERR("No HEV DTDs available: %x\n", index)
@@ -4221,7 +4440,7 @@ void si_edid_reset(struct edid_3d_data_t *mhl_edid_3d_data)
 	uint8_t *pData = (uint8_t *)&mhl_edid_3d_data->parse_data;
 
 	MHL_TX_DBG_INFO("\n")
-	
+	/* clear out EDID parse results */
 	for (i = 0; i < sizeof(mhl_edid_3d_data->parse_data); ++i)
 		pData[i] = 0;
 

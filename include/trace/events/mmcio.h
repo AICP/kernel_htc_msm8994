@@ -38,6 +38,50 @@ TRACE_EVENT(sys_sync_done,
 	TP_printk("[%s]", __entry->comm)
 );
 
+DECLARE_EVENT_CLASS(readpage_ops,
+	TP_PROTO(char *path, int size),
+
+	TP_ARGS(path, size),
+
+	TP_STRUCT__entry(
+		__field(unsigned, pid)
+		__field(int, size)
+		__array( char,		comm,	TASK_COMM_LEN	)
+		__array( char,		path,	256	)
+	),
+
+	TP_fast_assign(
+		__entry->pid		= current->pid;
+		__entry->size = size;
+		memcpy(__entry->comm, current->comm, TASK_COMM_LEN);
+		strncpy(__entry->path, path, 256);
+	),
+
+	TP_printk("file %s pages %d [%s:%u]",
+		__entry->path, __entry->size, __entry->comm, __entry->pid)
+);
+
+DEFINE_EVENT(readpage_ops, ext4_read_page,
+
+	TP_PROTO(char *path, int size),
+
+	TP_ARGS(path, size)
+);
+
+DEFINE_EVENT(readpage_ops, fuse_read_page,
+
+	TP_PROTO(char *path, int size),
+
+	TP_ARGS(path, size)
+);
+
+DEFINE_EVENT(readpage_ops, readahead,
+
+	TP_PROTO(char *path, int size),
+
+	TP_ARGS(path, size)
+);
+#if 0
 TRACE_EVENT(readahead,
 	TP_PROTO(struct file *file, int size),
 
@@ -64,7 +108,7 @@ TRACE_EVENT(readahead,
 		MAJOR(__entry->dev), MINOR(__entry->dev),
 		__get_str(name), __entry->size, __entry->comm, __entry->pid)
 );
-
+#endif
 DECLARE_EVENT_CLASS(file_op,
 	TP_PROTO(struct file *file),
 

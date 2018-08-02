@@ -189,6 +189,10 @@ typedef unsigned long dmaaddr_t;
 #endif /* BCMDMA64OSL */
 #define PHYSADDRISZERO(_pa) (PHYSADDRLO(_pa) == 0 && PHYSADDRHI(_pa) == 0)
 
+#ifdef CUSTOMER_HW_ONE
+#define PHYSADDRISPCIE(_pa) (PHYSADDRLO(_pa) >= 0xF8800000 && PHYSADDRLO(_pa) <= 0xF9000000)
+#endif /* CUSTOMER_HW_ONE */
+
 /* One physical DMA segment */
 typedef struct  {
 	dmaaddr_t addr;
