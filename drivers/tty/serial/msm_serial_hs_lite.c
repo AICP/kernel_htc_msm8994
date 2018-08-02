@@ -1966,7 +1966,7 @@ static int __init msm_serial_hsl_init(void)
 {
 	int ret;
 
-	
+	/* Switch Uart Debug by Kernel Flag  */
 	if (get_kernel_flag() & KERNEL_FLAG_SERIAL_HSL_ENABLE)
 		msm_serial_hsl_enable = 1;
 

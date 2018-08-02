@@ -18,16 +18,21 @@
 
 #include <linux/completion.h>
 
-#define HSML_VERSION_12             1 
+#define HSML_VERSION_12             1 /*++ 2015/04/10, USB Team, PCN00075 ++*/
 
 #define HSML_PROTOCOL_VERSION		0x0006
+/*++ 2015/04/10, USB Team, PCN00075 ++*/
 #if HSML_VERSION_12
+/*++ 2015/04/10, USB Team, PCN00076 ++*/
 #define HSML_12_PROTOCOL_VERSION	0x0100
+/*-- 2015/04/10, USB Team, PCN00076 --*/
 #endif
+/*-- 2015/04/10, USB Team, PCN00075 --*/
 #define HSML_07_PROTOCOL_VERSION	0x0008
 
 #define HTC_MODE_CONTROL_REQ		0x12
 
+/* HSML version 0.6 */
 #define CLIENT_INFO_SERVER_ROTATE_USED		(1 << 1)
 
 #define CTRL_CONF_TOUCH_EVENT_SUPPORTED		(1 << 0)
@@ -38,12 +43,14 @@
 #define HSML_CLIENT_SIG_SIZE		168
 #define HSML_SERVER_SIG_SIZE		148
 
+/*++ 2015/04/10, USB Team, PCN00075 ++*/
 #if HSML_VERSION_12
 enum {
     cHSML_VER_08 = 0,
     cHSML_VER_12,
 };
 #endif
+/*-- 2015/04/10, USB Team, PCN00075 --*/
 
 enum {
 	CLIENT_INFO_MESGID = 0,
@@ -144,6 +151,7 @@ struct key_event {
 } __attribute__ ((__packed__));
 
 
+/* HSML version 0.8 */
 enum {
 	HSML_08_REQ_GET_SERVER_VERSION = 0x40,
 	HSML_08_REQ_NUM_COMPRESSION_SETTINGS,
@@ -214,7 +222,9 @@ struct set_display_info {
 	u16 wMaxGrayLevel;
 } __attribute__ ((__packed__));
 
+/*++ 2015/04/10, USB Team, PCN00075 ++*/
 #if HSML_VERSION_12
+/* HSML version 1.2 */
 enum {
     HSML_12_REQ_GET_VERSION = 0x40,
     HSML_12_REQ_GET_PARAMETERS,
@@ -237,10 +247,12 @@ enum {
     HSML_12_PIXEL_FORMAT_RGB343,
 };
 
+/*++ 2015/04/10, USB Team, PCN00079 ++*/
 enum {
     HSML_12_CAP_ENDIAN = 0,
     HSML_12_CAP_FB_UPDATE,
 };
+/*-- 2015/04/10, USB Team, PCN00079 --*/
 
 struct get_parameters {
 	u32 capabilities;
@@ -257,16 +269,19 @@ struct set_parameters {
 	u32 encodingSupported;
 } __attribute__ ((__packed__));
 #endif
+/*-- 2015/04/10, USB Team, PCN00075 --*/
 
 struct hsml_protocol {
 	u16 version;
 	u16 vendor;
 	u8 request;
 	u32 MaxFPS;
+/*++ 2015/04/10, USB Team, PCN00075 ++*/
 #if HSML_VERSION_12
 	struct get_parameters get_parameters_info;
 	struct set_parameters set_parameters_info;
 #endif
+/*-- 2015/04/10, USB Team, PCN00075 --*/
 	struct get_server_configuation get_server_configuation_info;
 	struct set_server_configuation set_server_configuation_info;
 	struct get_display_capabilities get_display_capabilities_info;
@@ -274,4 +289,4 @@ struct hsml_protocol {
 	u8 debug_mode;
 };
 
-#endif 
+#endif /* _HTC_MODE_SERVER_H_ */

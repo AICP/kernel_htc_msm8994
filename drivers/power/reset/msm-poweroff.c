@@ -36,6 +36,8 @@
 #include "htc_restart_handler.h"
 #include <linux/qpnp/power-on.h>
 #include <linux/qpnp/qpnp-smbcharger.h>
+#include <linux/htc_flags.h>
+
 
 #define EMERGENCY_DLOAD_MAGIC1    0x322A4F99
 #define EMERGENCY_DLOAD_MAGIC2    0xC67E4350
@@ -48,12 +50,16 @@
 #define SCM_EDLOAD_MODE			0X01
 #define SCM_DLOAD_CMD			0x10
 
+#ifdef CONFIG_HTC_POWER_DEBUG
+extern void debug_htc_dump_pon_reg(void);
+#endif
 extern void msm_watchdog_bark(void);
 extern int cable_source;
 
 static int restart_mode;
 static bool scm_pmic_arbiter_disable_supported;
 static bool scm_deassert_ps_hold_supported;
+/* Download mode master kill-switch */
 static void __iomem *msm_ps_hold;
 static phys_addr_t tcsr_boot_misc_detect;
 
@@ -144,6 +150,8 @@ static void enable_emergency_dload_mode(void)
 				emergency_dload_mode_addr +
 				(2 * sizeof(unsigned int)));
 
+		/* Need disable the pmic wdt, then the emergency dload mode
+		 * will not auto reset. */
 		qpnp_pon_wd_config(0);
 		mb();
 	}
@@ -163,7 +171,7 @@ static int dload_set(const char *val, struct kernel_param *kp)
 	if (ret)
 		return ret;
 
-	
+	/* If download_mode is not zero or one, ignore. */
 	if (download_mode >> 1) {
 		download_mode = old_val;
 		return -EINVAL;
@@ -219,6 +227,12 @@ static void msm_flush_console(void)
 	local_irq_restore(flags);
 }
 
+/*
+ * Force the SPMI PMIC arbiter to shutdown so that no more SPMI transactions
+ * are sent from the MSM to the PMIC.  This is required in order to avoid an
+ * SPMI lockup on certain PMIC chips if PS_HOLD is lowered in the middle of
+ * an SPMI transaction.
+ */
 static void halt_spmi_pmic_arbiter(void)
 {
 	struct scm_desc desc = {
@@ -250,7 +264,7 @@ static enum pon_power_off_type htc_restart_cmd_to_type(const char* cmd)
 	} cmd_type[] = {
 		{"power-key-force-hard", PON_POWER_OFF_WARM_RESET},
 		{"force-dog-bark", PON_POWER_OFF_WARM_RESET},
-			
+			/* OEM RIL fatal: oem-95, 96, 98, 99 */
 		{"oem-61", PON_POWER_OFF_WARM_RESET},
 		{"oem-62", PON_POWER_OFF_WARM_RESET},
 		{"oem-63", PON_POWER_OFF_WARM_RESET},
@@ -271,7 +285,7 @@ static enum pon_power_off_type htc_restart_cmd_to_type(const char* cmd)
 		if (!strncmp(cmd, cmd_type[i].cmd, strlen(cmd_type[i].cmd)))
 			return cmd_type[i].type;
 
-	return PON_POWER_OFF_HARD_RESET; 
+	return PON_POWER_OFF_HARD_RESET; /* default reset type */
 }
 
 static void msm_restart_prepare(char mode, const char *cmd)
@@ -280,6 +294,10 @@ static void msm_restart_prepare(char mode, const char *cmd)
 
 #ifdef CONFIG_MSM_DLOAD_MODE
 
+	/* Write download mode flags if we're panic'ing
+	 * Write download mode flags if restart_mode says so
+	 * Kill download mode if master-kill switch is set
+	 */
 
 	set_dload_mode(download_mode &&
 			(in_panic || restart_mode == RESTART_DLOAD));
@@ -289,6 +307,9 @@ static void msm_restart_prepare(char mode, const char *cmd)
 				(cmd != NULL && cmd[0] != '\0'));
 
 	if (qpnp_pon_check_hard_reset_stored()) {
+		/* Set warm reset as true when device is in dload mode
+		 *  or device doesn't boot up into recovery, bootloader or rtc.
+		 */
 		if (get_dload_mode() ||
 			((cmd != NULL && cmd[0] != '\0') &&
 			strcmp(cmd, "recovery") &&
@@ -300,7 +321,7 @@ static void msm_restart_prepare(char mode, const char *cmd)
 			need_warm_reset = true;
 	}
 
-	
+	/* Hard reset the PMIC unless memory contents must be maintained. */
 	if (need_warm_reset) {
 		qpnp_pon_system_pwr_off(PON_POWER_OFF_WARM_RESET);
 	} else {
@@ -319,7 +340,7 @@ static void msm_restart_prepare(char mode, const char *cmd)
 	pr_info("%s: restart by command: [%s]\r\n", __func__, (cmd) ? cmd : "");
 
 	if (in_panic) {
-		
+		/* KP, do not overwrite the restart reason */
 	} else if (cmd != NULL) {
 		if (!strncmp(cmd, "bootloader", 10)) {
 			qpnp_pon_set_restart_reason(
@@ -368,7 +389,7 @@ static void msm_restart_prepare(char mode, const char *cmd)
 	msm_flush_console();
 	flush_cache_all();
 
-	
+	/*outer_flush_all is not supported by 64bit kernel*/
 #ifndef CONFIG_ARM64
 	outer_flush_all();
 #endif
@@ -383,6 +404,13 @@ static void msm_restart_prepare(char mode, const char *cmd)
 	}
 }
 
+/*
+ * Deassert PS_HOLD to signal the PMIC that we are ready to power down or reset.
+ * Do this by calling into the secure environment, if available, or by directly
+ * writing to a hardware register.
+ *
+ * This function should never return.
+ */
 static void deassert_ps_hold(void)
 {
 	struct scm_desc desc = {
@@ -390,13 +418,18 @@ static void deassert_ps_hold(void)
 		.arginfo = SCM_ARGS(1),
 	};
 
+#ifdef CONFIG_HTC_POWER_DEBUG
+	if(get_kernel_flag() & KERNEL_FLAG_SERIAL_HSL_ENABLE)
+		debug_htc_dump_pon_reg();
+#endif
+
 	if (scm_deassert_ps_hold_supported) {
-		
+		/* This call will be available on ARMv8 only */
 		scm_call2_atomic(SCM_SIP_FNID(SCM_SVC_PWR,
 				 SCM_IO_DEASSERT_PS_HOLD), &desc);
 	}
 
-	
+	/* Fall-through to the direct write in case the scm_call "returns" */
 	__raw_writel(0, msm_ps_hold);
 }
 
@@ -413,14 +446,18 @@ static void do_msm_restart(enum reboot_mode reboot_mode, const char *cmd)
 
 	msm_restart_prepare((char)reboot_mode, cmd);
 
-#ifdef CONFIG_MSM_FORCE_WDOG_BITE_ON_PANIC 
+#ifdef CONFIG_MSM_FORCE_WDOG_BITE_ON_PANIC //Change from CONFIG_MSM_DLOAD_MODE, HTC doesnt need QCT DLOAD
 
+	/*
+	 * Trigger a watchdog bite here and if this fails,
+	 * device will take the usual restart path.
+	 */
 
 	if (WDOG_BITE_ON_PANIC && in_panic)
 		msm_trigger_wdog_bite();
 #endif
 
-	
+	/* Needed to bypass debug image on some chips */
 	if (!is_scm_armv8())
 		ret = scm_call_atomic2(SCM_SVC_BOOT,
 			       SCM_WDOG_DEBUG_BOOT_PART, 1, 0);
@@ -450,7 +487,7 @@ static void do_msm_poweroff(void)
 #ifdef CONFIG_MSM_DLOAD_MODE
 	set_dload_mode(0);
 #endif
-	qpnp_pon_set_s3_timer(2); 
+	qpnp_pon_set_s3_timer(2); // 0x2: SEC_4
 
 	if (cable_source > 0) {
 		if (pmi8994_is_HVDCP_9V_done()) {
@@ -465,7 +502,7 @@ static void do_msm_poweroff(void)
 		qpnp_pon_system_pwr_off(PON_POWER_OFF_SHUTDOWN);
 	}
 
-	
+	/* Needed to bypass debug image on some chips */
 	if (!is_scm_armv8())
 		ret = scm_call_atomic2(SCM_SVC_BOOT,
 			       SCM_WDOG_DEBUG_BOOT_PART, 1, 0);

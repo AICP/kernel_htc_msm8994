@@ -247,6 +247,12 @@ struct ipv6_fl_socklist {
 	struct rcu_head			rcu;
 };
 
+static inline void txopt_put(struct ipv6_txoptions *opt)
+{
+	if (opt && atomic_dec_and_test(&opt->refcnt))
+		kfree_rcu(opt, rcu);
+}
+
 extern struct ip6_flowlabel	*fl6_sock_lookup(struct sock *sk, __be32 label);
 extern struct ipv6_txoptions	*fl6_merge_options(struct ipv6_txoptions * opt_space,
 						   struct ip6_flowlabel * fl,
@@ -265,12 +271,6 @@ static inline struct ipv6_txoptions *txopt_get(const struct ipv6_pinfo *np)
 		opt = NULL;
 	rcu_read_unlock();
 	return opt;
-}
-
-static inline void txopt_put(struct ipv6_txoptions *opt)
-{
-	if (opt && atomic_dec_and_test(&opt->refcnt))
-		kfree_rcu(opt, rcu);
 }
 
 static inline void fl6_sock_release(struct ip6_flowlabel *fl)

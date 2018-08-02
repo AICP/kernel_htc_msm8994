@@ -622,7 +622,7 @@ static void smp_send_all_cpu_backtrace(void)
 	if (!cpus_empty(backtrace_mask))
 		smp_cross_call_common(&backtrace_mask, IPI_CPU_BACKTRACE);
 
-	
+	/* Wait for up to 10 seconds for all other CPUs to do the backtrace */
 #if defined(CONFIG_HTC_DEBUG_WATCHDOG)
 	for (i = 0; i < backtrace_timeout * 1000; i++)
 #else
@@ -636,7 +636,7 @@ static void smp_send_all_cpu_backtrace(void)
 	}
 
 #if defined(CONFIG_HTC_DEBUG_WATCHDOG)
-	if(i == backtrace_timeout)
+	if(i == backtrace_timeout * 1000)
 		pr_info( " dump cpu backtrace timeout \n");
 #endif
 

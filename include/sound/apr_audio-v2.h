@@ -7168,6 +7168,7 @@ struct afe_spkr_prot_calib_get_resp {
 /* SRS TRUMEDIA start */
 /* topology */
 #define SRS_TRUMEDIA_TOPOLOGY_ID			0x00010D90
+#define HTC_SRS_TOPOLOGY_ID				0x10001000 //HTC_AUD
 /* module */
 #define SRS_TRUMEDIA_MODULE_ID				0x10005010
 /* parameters */

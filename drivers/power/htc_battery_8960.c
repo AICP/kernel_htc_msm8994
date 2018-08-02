@@ -21,7 +21,7 @@
 #include <linux/debugfs.h>
 #include <linux/wakelock.h>
 #include <linux/gpio.h>
-#if 0
+#if 0//FIXME
 #include <asm/mach-types.h>
 #include <mach/devices_cmdline.h>
 #include <mach/devices_dtb.h>
@@ -50,9 +50,10 @@
 #include <linux/qpnp/qpnp-smbcharger.h>
 #include <linux/qpnp/qpnp-fg.h>
 #include <linux/of.h>
-#if 0
+#if 0//FIXME
 #include <mach/htc_battery_cell.h>
 #endif
+/* disable charging reason */
 #define HTC_BATT_CHG_DIS_BIT_EOC	(1)
 #define HTC_BATT_CHG_DIS_BIT_ID		(1<<1)
 #define HTC_BATT_CHG_DIS_BIT_TMP	(1<<2)
@@ -63,8 +64,21 @@
 #define HTC_BATT_CHG_DIS_BIT_STOP_SWOLLEN	(1<<7)
 #define HTC_BATT_CHG_DIS_BIT_USB_OVERHEAT	(1<<8)
 #define HTC_BATT_CHG_DIS_BIT_FTM	(1<<9)
+/* for batt cycle info */
+#define HTC_BATT_TOTAL_LEVELRAW		3144
+#define HTC_BATT_OVERHEAT_MSEC		3148
+#define HTC_BATT_FIRST_USE_TIME		3152
+#define HTC_BATT_CYCLE_CHECKSUM		3156
 
+#define STORE_MAGIC_NUM      0xDDAACC00
+
+/* global variables */
 int cable_source;
+/* for batt cycle info */
+unsigned int g_total_level_raw;
+unsigned int g_overheat_55_sec;
+unsigned int g_batt_first_use_time;
+unsigned int g_batt_cycle_checksum;
 
 static int chg_dis_reason;
 static int chg_dis_active_mask = HTC_BATT_CHG_DIS_BIT_ID
@@ -81,27 +95,40 @@ static int chg_dis_control_mask = HTC_BATT_CHG_DIS_BIT_ID
 								| HTC_BATT_CHG_DIS_BIT_USR_TMR
 								| HTC_BATT_CHG_DIS_BIT_USB_OVERHEAT
 								| HTC_BATT_CHG_DIS_BIT_FTM;
+/* disable pwrsrc reason */
 #define HTC_BATT_PWRSRC_DIS_BIT_MFG		(1)
 #define HTC_BATT_PWRSRC_DIS_BIT_API		(1<<1)
 #define HTC_BATT_PWRSRC_DIS_BIT_USB_OVERHEAT (1<<2)
 static int pwrsrc_dis_reason;
 
 static int need_sw_stimer;
+/* ext charger's safety timer */
 static unsigned long sw_stimer_counter;
 static int sw_stimer_fault;
 #define HTC_SAFETY_TIME_16_HR_IN_MS		(16*60*60*1000)
 
 
+/* for sprint disable charging cmd */
 static int chg_dis_user_timer;
+/* for charger disable charging by temperature fault */
 static int charger_dis_temp_fault;
+/* is charger under rating */
 static int charger_under_rating;
+/* is safety timer of charger timeout */
 static int charger_safety_timeout;
+/* is battery fully charged with charging stopped */
 static int batt_full_eoc_stop;
+/* for ftm disable charging cmd */
 static enum ftm_charger_control_flag ftm_charger_control_flag;
+/* for saftey timer disable cmd */
 static int safety_timer_disable_flag;
+/* for decide whether it need to get consistent UI */
 static int get_consistent_flag;
 static int checked_consistent_flag;
+/* is battery fully charged with charging stopped */
+static bool g_flag_ats_limit_chg;
 
+/* for limited charge */
 static int chg_limit_reason;
 static int iusb_limit_reason;
 static int chg_limit_active_mask;
@@ -110,11 +137,38 @@ static int chg_limit_timer_sub_mask;
 #endif
 static int chg_restrict;
 
+/* BI Data Thermal Battery Temperature */
+static int g_thermal_batt_temp = 0;
+
+/* BI for batt charging */
+#define HTC_BATT_CHG_BI_BIT_CHGR			(1)
+#define HTC_BATT_CHG_BI_BIT_AGING			(1<<1)
+static int g_BI_data_ready = 0;
+static struct timeval gs_batt_chgr_start_time = { 0, 0 };
+static int g_batt_chgr_iusb = 0;
+static int g_batt_chgr_ibat = 0;
+static int g_batt_chgr_start_temp = 0;
+static int g_batt_chgr_end_temp = 0;
+static int g_batt_chgr_start_level = 0;
+static int g_batt_chgr_end_level = 0;
+static int g_batt_chgr_start_batvol = 0;
+static int g_batt_chgr_end_batvol = 0;
+
+/* BI for batt aging */
+static int g_batt_aging_bat_vol = 0;
+static int g_batt_aging_level = 0;
+static unsigned int g_pre_total_level_raw = 0;
+
+#define BI_BATT_CHGE_UPDATE_TIME_THRES		1800	// 30mins
+#define BI_BATT_CHGE_CHECK_TIME_THRES		36000	// 10HR
+
+/* for suspend high frequency (5min) */
 #define SUSPEND_HIGHFREQ_CHECK_BIT_TALK		(1)
 #define SUSPEND_HIGHFREQ_CHECK_BIT_SEARCH	(1<<1)
 #define SUSPEND_HIGHFREQ_CHECK_BIT_MUSIC	(1<<3)
 static int suspend_highfreq_check_reason;
 
+/* for batt_context_state */
 #define CONTEXT_STATE_BIT_TALK			(1)
 #define CONTEXT_STATE_BIT_SEARCH		(1<<1)
 #define CONTEXT_STATE_BIT_NAVIGATION		(1<<2)
@@ -122,6 +176,7 @@ static int suspend_highfreq_check_reason;
 #define CONTEXT_STATE_BIT_NET_TALK		(1<<4)
 static int context_state;
 
+/* for htc_batt_info.state */
 #define STATE_WORKQUEUE_PENDING			(1)
 #define STATE_EARLY_SUSPEND			(1<<1)
 #define STATE_PREPARE			(1<<2)
@@ -132,23 +187,32 @@ static int context_state;
 #define BATT_TIMER_CHECK_TIME				(360)
 #define BATT_TIMER_UPDATE_TIME				(60)
 
+/* small charging temperature setting*/
 #define SMALL_CHG_TEMP_SOFT     390
 #define SMALL_CHG_TEMP_HEAVY_LOW    440
 #define SMALL_CHG_TEMP_HEAVY_HIGH    460
 
-
+/* for htc_extension */
 #define HTC_EXT_UNKNOWN_USB_CHARGER		(1<<0)
 #define HTC_EXT_CHG_UNDER_RATING		(1<<1)
 #define HTC_EXT_CHG_SAFTY_TIMEOUT		(1<<2)
 #define HTC_EXT_CHG_FULL_EOC_STOP		(1<<3)
 #define HTC_EXT_BAD_CABLE_USED			(1<<4)
+#define HTC_EXT_QUICK_CHARGER_USED		(1<<5)
 
+/* PD charger */
+static bool g_is_pd_charger = false;
+static int g_pd_voltage = 0;
 
 #ifdef CONFIG_ARCH_MSM8X60_LTE
+/* MATT: fix me: check style warning */
+/* extern int __ref cpu_down(unsigned int cpu); */
+/* extern int board_mfg_mode(void); */
 #endif
 
 static void mbat_in_func(struct work_struct *work);
 struct delayed_work mbat_in_struct;
+//static DECLARE_DELAYED_WORK(mbat_in_struct, mbat_in_func);
 static struct kset *htc_batt_kset;
 
 #define BATT_REMOVED_SHUTDOWN_DELAY_MS (50)
@@ -157,6 +221,7 @@ static struct kset *htc_batt_kset;
 static void shutdown_worker(struct work_struct *work);
 struct delayed_work shutdown_work;
 static void batt_qb_mode_pwr_consumption_check(unsigned long cur_jiffies);
+//static DECLARE_DELAYED_WORK(shutdown_work, shutdown_worker);
 
 static void fake_src_detect_worker(struct work_struct *work);
 struct delayed_work fake_src_detect_work;
@@ -166,8 +231,13 @@ struct wake_lock fake_src_detect_wake_lock;
 static void check_consistent_worker(struct work_struct *work);
 struct delayed_work check_consistent_work;
 
+/* battery voltage alarm */
 #define BATT_CRITICAL_LOW_VOLTAGE		(3000)
 static int critical_shutdown = 0;
+/*
+ * critical_alarm_level = {0, 1, 2}, correspond
+ * alarm voltage(level) = critical_alarm_vol_ptr[critical_alarm_level]
+ */
 static int critical_alarm_level;
 static int critical_alarm_level_set;
 struct wake_lock voltage_alarm_wake_lock;
@@ -179,6 +249,7 @@ static struct early_suspend early_suspend;
 #ifdef CONFIG_HTC_BATT_ALARM
 static int screen_state;
 
+/* To disable holding wakelock when AC in for suspend test */
 static int ac_suspend_flag;
 #endif
 static int htc_ext_5v_output_now;
@@ -188,20 +259,21 @@ static bool qb_mode_enter = false;
 static int pre_usb_temp;
 #endif
 
+/* static int prev_charging_src; */
 static int latest_chg_src = CHARGER_BATTERY;
 
 struct htc_battery_info {
 	int device_id;
 
-	
+	/* lock to protect the battery info */
 	struct mutex info_lock;
 
 	spinlock_t batt_lock;
 	int is_open;
 
-	
+	/* threshold voltage to drop battery level aggressively */
 	int critical_low_voltage_mv;
-	
+	/* voltage alarm threshold voltage */
 	int *critical_alarm_vol_ptr;
 	int critical_alarm_vol_cols;
 	int force_shutdown_batt_vol;
@@ -226,12 +298,11 @@ struct htc_battery_info {
 
 	int guage_driver;
 	int charger;
-	
+	/* gauge/charger interface */
 	struct htc_gauge *igauge;
 	struct htc_charger *icharger;
 	struct htc_battery_cell *bcell;
 	int state;
-	unsigned int htc_extension;	
 #if defined(CONFIG_FB)
 	struct notifier_block fb_notif;
 	struct workqueue_struct *batt_fb_wq;
@@ -244,7 +315,7 @@ struct htc_battery_timer {
 	struct mutex schedule_lock;
 	unsigned long batt_system_jiffies;
 	unsigned long batt_suspend_ms;
-	unsigned long total_time_ms;	
+	unsigned long total_time_ms;	/* since last do batt_work */
 	unsigned int batt_alarm_status;
 #ifdef CONFIG_HTC_BATT_ALARM
 	unsigned int batt_critical_alarm_counter;
@@ -264,7 +335,8 @@ struct htc_battery_timer {
 };
 static struct htc_battery_timer htc_batt_timer;
 
-struct mutex cable_notifier_lock; 
+/* cable detect */
+struct mutex cable_notifier_lock; /* synchronize notifier func call */
 static void cable_status_notifier_func(int online);
 static struct t_cable_status_notifier cable_status_notifier = {
 	.name = "htc_battery_8960",
@@ -299,6 +371,21 @@ static struct dec_level_by_current_ua dec_level_curr_table[] = {
 
 static const int DEC_LEVEL_CURR_TABLE_SIZE = sizeof(dec_level_curr_table) / sizeof (dec_level_curr_table[0]);
 
+static char* htc_chr_type_data_str[] = {
+	"NONE",		// No charger
+	"UNKNOWN",	// Unknown charger
+	"UNKNOWN_TYPE",	// Unknown type
+	"USB",		// Normal USB charger
+	"USB_CDP",	// USB 3.0 port, framework will show AC charging.
+	"AC(USB_DCP)",	// Normal AC charger
+	"USB_HVDCP",	// QC2.0
+	"USB_HVDCP_3",	// QC3.0
+	"PD_5V",	// PD 5V
+	"PD_9V",	// PD 9V
+	"PD_12V",	// PD 12V
+	"USB_TYPE_C",	// USB TypeC charger
+};
+
 #ifdef CONFIG_DUTY_CYCLE_LIMIT
 enum {
 	LIMIT_CHG_TIMER_STATE_NONE = 0,
@@ -309,16 +396,17 @@ enum {
 static uint limit_chg_timer_state = 0;
 struct delayed_work limit_chg_timer_work;
 
-static int limit_charge_timer_ma = 0; 
+static int limit_charge_timer_ma = 0; /* HTC designed */
 module_param(limit_charge_timer_ma, int, 0644);
 
-static int limit_charge_timer_on = 0; 
+static int limit_charge_timer_on = 0; /* HTC designed */
 module_param(limit_charge_timer_on, int, 0644);
 
-static int limit_charge_timer_off = 0; 
+static int limit_charge_timer_off = 0; /* HTC designed */
 module_param(limit_charge_timer_off, int, 0644);
 #endif
 
+/* htc gauge convenience function */
 int htc_gauge_get_battery_voltage(int *result)
 {
 	if (htc_batt_info.igauge && htc_batt_info.igauge->get_battery_voltage)
@@ -337,6 +425,7 @@ int htc_gauge_set_chg_ovp(int is_ovp)
 }
 EXPORT_SYMBOL(htc_gauge_set_chg_ovp);
 
+/* For touch panel, touch panel may loss wireless charger notification when system boot up */
 int htc_is_wireless_charger(void)
 {
 	if (htc_battery_initial)
@@ -345,6 +434,7 @@ int htc_is_wireless_charger(void)
 		return -1;
 }
 
+/* matt add */
 int htc_batt_schedule_batt_info_update(void)
 {
 	if (htc_battery_probe_flag == 0 || fg_probe_flag == 0)
@@ -361,12 +451,13 @@ int htc_batt_schedule_batt_info_update(void)
 				__func__, htc_batt_info.state);
 	}
 
-	
+	/*  MATT: use spin_lock? */
 	wake_lock(&htc_batt_timer.battery_lock);
 	queue_work(htc_batt_timer.batt_wq, &htc_batt_timer.batt_work);
 	return 0;
 }
 
+/* generic voltage alarm handle */
 static void batt_lower_voltage_alarm_handler(int status)
 {
 	wake_lock(&voltage_alarm_wake_lock);
@@ -400,11 +491,11 @@ static void unknown_usb_detect_worker(struct work_struct *work)
 	{
 		if (htc_batt_info.icharger->get_cable_type_by_usb_detect){
 			htc_batt_info.icharger->get_cable_type_by_usb_detect(&usb_detect_type);
-			if(usb_detect_type == -1)
+			if(usb_detect_type == -1)//Unknown USB type
 				htc_charger_event_notify(HTC_CHARGER_EVENT_SRC_UNKNOWN_USB);
-			else if (usb_detect_type == -4) 
+			else if (usb_detect_type == -4) //MHL unknown type
 				htc_charger_event_notify(HTC_CHARGER_EVENT_SRC_MHL_UNKNOWN);
-			else if (usb_detect_type == 1) 
+			else if (usb_detect_type == 1) //USB type only
 				htc_charger_event_notify(HTC_CHARGER_EVENT_SRC_USB);
 			else if (usb_detect_type == 2)
 				htc_charger_event_notify(HTC_CHARGER_EVENT_SRC_AC);
@@ -421,8 +512,8 @@ int usb_type_event_notify(int result)
 {
 	pr_info("[BATT] %s result : %d\n", __func__, result);
 
-	
-	
+	/*When cable removed no need to check USB notification*/
+	/*This might be a delayed response in case of frequent Vbus oscillation*/
 	if(latest_chg_src == CHARGER_BATTERY &&
 		result >= CONNECT_TYPE_NONE	&&
 		result <= CONNECT_TYPE_9V_AC){
@@ -432,23 +523,23 @@ int usb_type_event_notify(int result)
 
 	switch(result)
 	{
-		
+		/* USB None : 0 */
 		case CONNECT_TYPE_NONE :
 			htc_charger_event_notify(HTC_CHARGER_EVENT_SRC_NONE);
 			break;
-		
+		/* Unknown USB type : -1 */
 		case CONNECT_TYPE_UNKNOWN:
 			htc_charger_event_notify(HTC_CHARGER_EVENT_SRC_UNKNOWN_USB);
 			break;
-		
+		/* MHL unknown/detecting type : -4 */
 		case CONNECT_TYPE_MHL_UNKNOWN:
 			htc_charger_event_notify(HTC_CHARGER_EVENT_SRC_MHL_UNKNOWN);
 			break;
-		
+		/* USB type only : 1 */
 		case CONNECT_TYPE_USB:
 			htc_charger_event_notify(HTC_CHARGER_EVENT_SRC_USB);
 			break;
-		
+		/* AC : 2 */
 		case CONNECT_TYPE_AC:
 			htc_charger_event_notify(HTC_CHARGER_EVENT_SRC_AC);
 			break;
@@ -473,6 +564,7 @@ int usb_type_event_notify(int result)
 	return 0;
 }
 
+/* TODO: synchornize this function */
 int htc_gauge_event_notify(enum htc_gauge_event event)
 {
 	pr_info("[BATT] %s gauge event=%d\n", __func__, event);
@@ -490,8 +582,8 @@ int htc_gauge_event_notify(enum htc_gauge_event event)
 						&& htc_batt_info.rep.cable_ready)
 			htc_batt_schedule_batt_info_update();
 
-#if 0
-		
+#if 0//FIXME
+		/* register batt alarm */
 		if (htc_batt_info.igauge && htc_batt_info.critical_alarm_vol_cols) {
 			if (htc_batt_info.igauge->register_lower_voltage_alarm_notifier)
 				htc_batt_info.igauge->register_lower_voltage_alarm_notifier(
@@ -504,7 +596,7 @@ int htc_gauge_event_notify(enum htc_gauge_event event)
 		}
 #endif
 
-		
+		/* check status of cable when battery driver probe */
 		if (htc_batt_info.icharger &&
 				htc_batt_info.icharger->fake_chg_src_detect)
 			wake_lock(&fake_src_detect_wake_lock);
@@ -532,9 +624,11 @@ int htc_gauge_event_notify(enum htc_gauge_event event)
 		batt_lower_voltage_alarm_handler(1);
 		break;
 	case HTC_GAUGE_EVENT_BATT_REMOVED:
+//		if (!(get_kernel_flag() & KERNEL_FLAG_TEST_PWR_SUPPLY)) {
 		wake_lock(&batt_shutdown_wake_lock);
 		schedule_delayed_work(&shutdown_work,
 			msecs_to_jiffies(BATT_REMOVED_SHUTDOWN_DELAY_MS));
+//		}
 		break;
 	case HTC_GAUGE_EVENT_EOC_STOP_CHG:
 		sw_stimer_counter = 0;
@@ -555,17 +649,23 @@ int htc_gauge_event_notify(enum htc_gauge_event event)
 	return 0;
 }
 
+/* TODO: synchornize this function and gauge_event_notify:
+ * define call condition: in interrupt context or not. or separate it:
+ * idea1: move cable event to cable_status_handler directly.
+ * idea2: move those need mutex protect code to work queue worker.
+ * idea3: queuing all event handler here. or queuing all caller function
+ *        to prevent it calls from interrupt handler. */
 int htc_charger_event_notify(enum htc_charger_event event)
 {
-	
+	/* MATT TODO: check we need to queue a work here */
 	pr_info("[BATT] %s charger event=%d\n", __func__, event);
 	switch (event) {
 	case HTC_CHARGER_EVENT_BATT_UEVENT_CHANGE :
 		htc_battery_update_batt_uevent();
 		break;
 	case HTC_CHARGER_EVENT_VBUS_IN:
-		
-		
+		/* latest_chg_src = CHARGER_USB; */
+		/* htc_batt_info.rep.charging_source = CHARGER_USB; */
 		break;
 	case HTC_CHARGER_EVENT_SRC_INTERNAL:
 		htc_ext_5v_output_now = 1;
@@ -595,8 +695,10 @@ int htc_charger_event_notify(enum htc_charger_event event)
 		htc_batt_schedule_batt_info_update();
 		break;
 	case HTC_CHARGER_EVENT_VBUS_OUT:
-	case HTC_CHARGER_EVENT_SRC_NONE: 
+	case HTC_CHARGER_EVENT_SRC_NONE: /* synchorized call from cable notifier */
 		latest_chg_src = CHARGER_BATTERY;
+		/* prev_charging_src = htc_batt_info.rep.charging_source;
+		htc_batt_info.rep.charging_source = CHARGER_BATTERY; */
 		if (delayed_work_pending(&htc_batt_timer.unknown_usb_detect_work)) {
 			cancel_delayed_work_sync(&htc_batt_timer.unknown_usb_detect_work);
 			wake_unlock(&htc_batt_timer.unknown_usb_detect_lock);
@@ -609,23 +711,33 @@ int htc_charger_event_notify(enum htc_charger_event event)
 #endif
 		htc_batt_schedule_batt_info_update();
 		break;
-	case HTC_CHARGER_EVENT_SRC_USB: 
+	case HTC_CHARGER_EVENT_SRC_USB: /* synchorized call from cable notifier */
+		/* for  ATS tesing evironment, if detect unknown
+		charger, we reply AC if set flag 6 4000000*/
 		if (get_kernel_flag() & KERNEL_FLAG_ENABLE_FAST_CHARGE)
 			latest_chg_src = CHARGER_AC;
 		else
 			latest_chg_src = CHARGER_USB;
+		/* prev_charging_src = htc_batt_info.rep.charging_source;
+		htc_batt_info.rep.charging_source = CHARGER_USB; */
 		htc_batt_schedule_batt_info_update();
 		break;
-	case HTC_CHARGER_EVENT_SRC_AC: 
+	case HTC_CHARGER_EVENT_SRC_AC: /* synchforized call form cable notifier */
 		latest_chg_src = CHARGER_AC;
+		/* prev_charging_src = htc_batt_info.rep.charging_source;
+		htc_batt_info.rep.charging_source = CHARGER_AC; */
 		htc_batt_schedule_batt_info_update();
 		break;
-	case HTC_CHARGER_EVENT_SRC_WIRELESS: 
+	case HTC_CHARGER_EVENT_SRC_WIRELESS: /* synchorized call from cable notifier */
 		latest_chg_src = CHARGER_WIRELESS;
+		/* prev_charging_src = htc_batt_info.rep.charging_source;
+		htc_batt_info.rep.charging_source = CHARGER_USB; */
 		htc_batt_schedule_batt_info_update();
 		break;
-	case HTC_CHARGER_EVENT_SRC_DETECTING: 
+	case HTC_CHARGER_EVENT_SRC_DETECTING: /* synchorized call from cable notifier */
 		latest_chg_src = CHARGER_DETECTING;
+		/* prev_charging_src = htc_batt_info.rep.charging_source;
+		htc_batt_info.rep.charging_source = CHARGER_DETECTING; */
 		htc_batt_schedule_batt_info_update();
 		wake_lock(&htc_batt_timer.unknown_usb_detect_lock);
 		queue_delayed_work(htc_batt_timer.batt_wq,
@@ -633,11 +745,15 @@ int htc_charger_event_notify(enum htc_charger_event event)
 				round_jiffies_relative(msecs_to_jiffies(
 								UNKNOWN_USB_DETECT_DELAY_MS)));
 		break;
-	case HTC_CHARGER_EVENT_SRC_UNKNOWN_USB: 
+	case HTC_CHARGER_EVENT_SRC_UNKNOWN_USB: /* synchorized call from cable notifier */
+		/* for  ATS tesing evironment, if detect unknown
+		charger, we reply AC if set flag 6 4000000*/
 		if (get_kernel_flag() & KERNEL_FLAG_ENABLE_FAST_CHARGE)
 			latest_chg_src = CHARGER_AC;
 		else
 			latest_chg_src = CHARGER_UNKNOWN_USB;
+		/* prev_charging_src = htc_batt_info.rep.charging_source;
+		htc_batt_info.rep.charging_source = CHARGER_UNKNOWN_USB; */
 		htc_batt_schedule_batt_info_update();
 		break;
 	case HTC_CHARGER_EVENT_OVP:
@@ -677,7 +793,7 @@ int htc_charger_event_notify(enum htc_charger_event event)
 	case HTC_CHARGER_EVENT_READY:
 		if (!htc_batt_info.icharger) {
 			pr_err("[BATT] htc_charger is not hooked yet.\n");
-				
+				/* MATT TODO check if we allow batt_state set to 1 here */
 			break;
 		}
 		mutex_lock(&htc_batt_info.info_lock);
@@ -703,6 +819,10 @@ int htc_charger_event_notify(enum htc_charger_event event)
 								USB_OVERHEAT_MONITOR_DELAY_MS)));
 #endif
 		break;
+	case HTC_CHARGER_EVENT_SRC_HVDCP:
+		// For update extension bit 5 to 1 when the charger is QC2.0/QC3.0
+		htc_batt_schedule_batt_info_update();
+		break;
 	default:
 		pr_info("[BATT] unsupported charger event(%d)\n", event);
 		break;
@@ -710,6 +830,7 @@ int htc_charger_event_notify(enum htc_charger_event event)
 	return 0;
 }
 
+/* MATT porting */
 #if 0
 #ifdef CONFIG_HTC_BATT_ALARM
 static int batt_set_voltage_alarm(unsigned long lower_threshold,
@@ -765,6 +886,10 @@ static int batt_set_voltage_alarm_mode(int mode)
 
 
 	mutex_lock(&batt_set_alarm_lock);
+	/*if (battery_vol_alarm_mode != BATT_ALARM_DISABLE_MODE &&
+		mode != BATT_ALARM_DISABLE_MODE)
+		BATT_ERR("%s:Warning:set mode to %d from non-disable mode(%d)",
+			__func__, mode, battery_vol_alarm_mode); */
 	switch (mode) {
 	case BATT_ALARM_DISABLE_MODE:
 		rc = batt_clear_voltage_alarm();
@@ -809,7 +934,7 @@ static int battery_alarm_notifier_func(struct notifier_block *nfb,
 		if (++htc_batt_timer.batt_critical_alarm_counter >= 3) {
 			BATT_LOG("%s: 3V voltage alarm is triggered.", __func__);
 			htc_batt_info.rep.level = 1;
-			
+			/* htc_battery_core_update(BATTERY_SUPPLY); */
 			htc_battery_core_update_changed();
 		}
 		batt_set_voltage_alarm_mode(BATT_ALARM_CRITICAL_MODE);
@@ -817,7 +942,7 @@ static int battery_alarm_notifier_func(struct notifier_block *nfb,
 		htc_batt_timer.batt_alarm_status++;
 		BATT_LOG("%s: NORMAL_MODE batt alarm status = %u", __func__,
 			htc_batt_timer.batt_alarm_status);
-	} else { 
+	} else { /* BATT_ALARM_DISABLE_MODE */
 		BATT_ERR("%s:Warning: batt alarm triggerred in disable mode ", __func__);
 	}
 #else
@@ -828,21 +953,28 @@ static int battery_alarm_notifier_func(struct notifier_block *nfb,
 }
 #endif
 
+/* MATT porting */
 #if 0
 static void update_wake_lock(int status)
 {
 #ifdef CONFIG_HTC_BATT_ALARM
+	/* hold an wakelock when charger connected until disconnected
+		except for AC under test mode(ac_suspend_flag=1). */
 	if (status != CHARGER_BATTERY && !ac_suspend_flag)
 		wake_lock(&htc_batt_info.vbus_wake_lock);
 	else if (status == CHARGER_USB && ac_suspend_flag)
-		
+		/* For suspend test, not hold wake lock when AC in */
 		wake_lock(&htc_batt_info.vbus_wake_lock);
 	else
+		/* give userspace some time to see the uevent and update
+		   LED state or whatnot...*/
 		   wake_lock_timeout(&htc_batt_info.vbus_wake_lock, HZ * 5);
 #else
 	if (status == CHARGER_USB)
 		wake_lock(&htc_batt_info.vbus_wake_lock);
 	else
+		/* give userspace some time to see the uevent and update
+		   LED state or whatnot...*/
 		wake_lock_timeout(&htc_batt_info.vbus_wake_lock, HZ * 5);
 #endif
 }
@@ -854,11 +986,13 @@ static void cable_status_notifier_func(enum usb_connect_type online)
 	mutex_lock(&cable_notifier_lock);
 	htc_batt_info.rep.cable_ready = 1;
 
+	/* WA: Enable charger ready bit here if charger driver probe   *
+	  *  is earlier than battery 8960 driver.              		*/
 	if (!htc_batt_info.icharger->ready)
 		htc_batt_info.icharger->ready = 1;
 
 	BATT_LOG("%s(%d)", __func__, online);
-	
+	//if (online == htc_batt_info.rep.charging_source && !first_update) {
 	if (online == latest_chg_src && !first_update) {
 		BATT_LOG("%s: charger type (%u) same return.",
 			__func__, online);
@@ -871,17 +1005,17 @@ static void cable_status_notifier_func(enum usb_connect_type online)
 	case CONNECT_TYPE_USB:
 		BATT_LOG("USB charger");
 		htc_charger_event_notify(HTC_CHARGER_EVENT_SRC_USB);
-		
+		/* radio_set_cable_status(CHARGER_USB); */
 		break;
 	case CONNECT_TYPE_AC:
 		BATT_LOG("5V AC charger");
 		htc_charger_event_notify(HTC_CHARGER_EVENT_SRC_AC);
-		
+		/* radio_set_cable_status(CHARGER_AC); */
 		break;
 	case CONNECT_TYPE_WIRELESS:
 		BATT_LOG("wireless charger");
 		htc_charger_event_notify(HTC_CHARGER_EVENT_SRC_WIRELESS);
-		
+		/* radio_set_cable_status(CHARGER_WIRELESS); */
 		break;
 	case CONNECT_TYPE_UNKNOWN:
 		BATT_LOG("unknown type");
@@ -889,7 +1023,7 @@ static void cable_status_notifier_func(enum usb_connect_type online)
 		break;
 	case CONNECT_TYPE_INTERNAL:
 		BATT_LOG("delivers power to VBUS from battery (not supported)");
-		
+		/* pass mhl dongle info into ext charger, for output 5v purpose */
 		htc_charger_event_notify(HTC_CHARGER_EVENT_SRC_INTERNAL);
 		break;
 	case CONNECT_TYPE_CLEAR:
@@ -900,7 +1034,7 @@ static void cable_status_notifier_func(enum usb_connect_type online)
 	case CONNECT_TYPE_NONE:
 		BATT_LOG("No cable exists");
 		htc_charger_event_notify(HTC_CHARGER_EVENT_SRC_NONE);
-		
+		/* radio_set_cable_status(CHARGER_BATTERY); */
 		break;
 	case CONNECT_TYPE_MHL_AC:
 		BATT_LOG("mhl_ac");
@@ -917,10 +1051,10 @@ static void cable_status_notifier_func(enum usb_connect_type online)
 	default:
 		BATT_LOG("unsupported connect_type=%d", online);
 		htc_charger_event_notify(HTC_CHARGER_EVENT_SRC_NONE);
-		
+		/* radio_set_cable_status(CHARGER_BATTERY); */
 		break;
 	}
-#if 0 
+#if 0 /* MATT check porting */
 	htc_batt_timer.alarm_timer_flag =
 			(unsigned int)htc_batt_info.rep.charging_source;
 
@@ -932,6 +1066,10 @@ static void cable_status_notifier_func(enum usb_connect_type online)
 static int htc_battery_set_charging(int ctl)
 {
 	int rc = 0;
+/* MATT porting
+	if (htc_batt_info.charger == SWITCH_CHARGER_TPS65200)
+		rc = tps_set_charger_ctrl(ctl);
+*/
 	return rc;
 }
 
@@ -947,14 +1085,14 @@ static void set_limit_input_current_with_reason(bool enable, int reason)
 		else
 			iusb_limit_reason &= ~reason;
 
-		
-		
+		/* Needs to check whether it need to set current everytime */
+		//if (prev_iusb_limit_reason != iusb_limit_reason) {
 			if (htc_batt_info.icharger &&
 					htc_batt_info.icharger->set_limit_input_current) {
 				htc_batt_info.icharger->set_limit_input_current(
 						!!iusb_limit_reason, iusb_limit_reason);
 			}
-		
+		//}
 	}
 	mutex_unlock(&iusb_limit_lock);
 }
@@ -964,6 +1102,7 @@ static void set_limit_charge_with_reason(bool enable, int reason, int restrict)
 {
 	int prev_chg_limit_reason;
 	int prev_chg_restrict = RESTRICT_NONE;
+	static int s_prev_chg_src = -1;
 #ifdef CONFIG_DUTY_CYCLE_LIMIT
 	int chg_limit_current;
 #endif
@@ -973,9 +1112,9 @@ static void set_limit_charge_with_reason(bool enable, int reason, int restrict)
 	chg_restrict = restrict;
 
 	BATT_LOG("chg_limit_reason:0x%x->0x%d, chg_restrict:%d-->%d, "
-			"enable:%d, reason:0x%x, restrict:%d",
+			"enable:%d, reason:0x%x, restrict:%d, chg_src:%d->%d",
 			prev_chg_limit_reason, chg_limit_reason, prev_chg_restrict, chg_restrict,
-			enable, reason, restrict);
+			enable, reason, restrict, s_prev_chg_src, htc_batt_info.rep.charging_source);
 
 	if (chg_limit_active_mask & reason) {
 		if (enable)
@@ -983,11 +1122,9 @@ static void set_limit_charge_with_reason(bool enable, int reason, int restrict)
 		else
 			chg_limit_reason &= ~reason;
 
-		if ((prev_chg_limit_reason ^ chg_limit_reason) || (prev_chg_restrict != chg_restrict)) {
-			if (((!!prev_chg_limit_reason != !!chg_limit_reason) ||
-					(prev_chg_restrict != chg_restrict)) &&
-					htc_batt_info.icharger &&
-					htc_batt_info.icharger->set_limit_charge_enable) {
+			if ((prev_chg_limit_reason ^ chg_limit_reason) || (!!prev_chg_limit_reason != !!chg_limit_reason) ||
+			(prev_chg_restrict != chg_restrict) || (s_prev_chg_src != htc_batt_info.rep.charging_source)){
+				if(htc_batt_info.icharger && htc_batt_info.icharger->set_limit_charge_enable) {
 #ifdef CONFIG_DUTY_CYCLE_LIMIT
 				chg_limit_current = limit_charge_timer_on != 0 ? limit_charge_timer_ma : 0;
 				htc_batt_info.icharger->set_limit_charge_enable(chg_limit_reason,
@@ -999,6 +1136,7 @@ static void set_limit_charge_with_reason(bool enable, int reason, int restrict)
 			}
 		}
 	}
+	s_prev_chg_src = htc_batt_info.rep.charging_source;
 	mutex_unlock(&chg_limit_lock);
 }
 
@@ -1024,7 +1162,7 @@ static void limit_chg_timer_worker(struct work_struct *work)
 					round_jiffies_relative(msecs_to_jiffies
 						(limit_charge_timer_on * 1000)));
 		}
-		
+		/* go through */
 	case LIMIT_CHG_TIMER_STATE_NONE:
 	default:
 		htc_batt_info.icharger->set_charger_enable(!!htc_batt_info.rep.charging_enabled);
@@ -1110,14 +1248,14 @@ static void __context_event_handler(enum batt_context_event event)
 	htc_batt_schedule_batt_info_update();
 }
 
-struct mutex context_event_handler_lock; 
+struct mutex context_event_handler_lock; /* synchroniz context_event_handler */
 static int htc_batt_context_event_handler(enum batt_context_event event)
 {
 	int prev_context_state;
 
 	mutex_lock(&context_event_handler_lock);
 	prev_context_state = context_state;
-	
+	/* STEP.1: check if state not changed then return */
 	switch (event) {
 	case EVENT_TALK_START:
 		if (context_state & CONTEXT_STATE_BIT_TALK)
@@ -1175,7 +1313,7 @@ static int htc_batt_context_event_handler(enum batt_context_event event)
 	}
 	BATT_LOG("context_state: 0x%x -> 0x%x", prev_context_state, context_state);
 
-	
+	/* STEP.2: handle incoming event */
 	__context_event_handler(event);
 
 exit:
@@ -1197,18 +1335,18 @@ static int htc_batt_charger_control(enum charger_control_flag control)
 			chg_dis_user_timer = 0;
 			break;
 		case DISABLE_PWRSRC:
+		case DISABLE_PWRSRC_FINGERPRINT:
 			pwrsrc_dis_reason |= HTC_BATT_PWRSRC_DIS_BIT_API;
 			break;
 		case ENABLE_PWRSRC:
+		case ENABLE_PWRSRC_FINGERPRINT:
 			pwrsrc_dis_reason &= ~HTC_BATT_PWRSRC_DIS_BIT_API;
 			break;
-
 		case ENABLE_LIMIT_CHARGER:
 		case DISABLE_LIMIT_CHARGER:
 			BATT_EMBEDDED("%s: skip charger_contorl(%d)", __func__, control);
 			return ret;
 			break;
-
 		default:
 			BATT_EMBEDDED("%s: unsupported charger_contorl(%d)", __func__, control);
 			ret =  -1;
@@ -1332,7 +1470,7 @@ static void batt_qb_mode_pwr_consumption_check(unsigned long time_since_last_upd
 	}
 	return;
 }
-
+#if 0   // Removed for misc_partition write permission
 static void htc_batt_store_battery_ui_soc(int soc_ui)
 {
 	if (soc_ui <= 0 || soc_ui > 100)
@@ -1353,14 +1491,14 @@ static void htc_batt_get_battery_ui_soc(int *soc_ui)
 			htc_batt_info.igauge->get_battery_ui_soc) {
 			temp_soc = htc_batt_info.igauge->get_battery_ui_soc();
 
-			
+			/* Only use stored_soc value between 1%~100% due to default eMMC misc is empty*/
 			if (temp_soc > 0 && temp_soc <= 100)
 				*soc_ui = temp_soc;
 	}
 
 	return;
 }
-
+#endif
 static int htc_battery_get_rt_attr(enum htc_batt_rt_attr attr, int *val)
 {
 	int ret = -EINVAL;
@@ -1405,24 +1543,35 @@ static int htc_battery_show_batt_attr(struct device_attribute *attr,
 					char *buf)
 {
 	int len = 0;
+	time_t t = g_batt_first_use_time;
+	struct tm timeinfo;
 
-	
+	time_to_tm(t, 0, &timeinfo);
+
+	/* collect htc_battery vars */
 	len += scnprintf(buf + len, PAGE_SIZE - len,
 			"charging_source: %d;\n"
 			"charging_enabled: %d;\n"
 			"overload: %d;\n"
 			"Percentage(%%): %d;\n"
 			"Percentage_raw(%%): %d;\n"
-			"htc_extension: 0x%x;\n",
+			"htc_extension: 0x%x;\n"
+			"batt_cycle_first_use: %04ld%02d%02d%02d%02d%02d\n"
+			"batt_cycle_level_raw: %u;\n"
+			"batt_cycle_overheat(s): %u;\n"
+			,
 			htc_batt_info.rep.charging_source,
 			htc_batt_info.rep.charging_enabled,
 			htc_batt_info.rep.overload,
 			htc_batt_info.rep.level,
 			htc_batt_info.rep.level_raw,
-			htc_batt_info.htc_extension
+			htc_batt_info.rep.htc_extension,
+			timeinfo.tm_year+1900, timeinfo.tm_mon+1, timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
+			g_total_level_raw,
+			g_overheat_55_sec
 			);
 
-	
+	/* collect gague vars */
 	if (htc_batt_info.igauge) {
 #if 0
 		if (htc_batt_info.igauge->name)
@@ -1434,7 +1583,7 @@ static int htc_battery_show_batt_attr(struct device_attribute *attr,
 						PAGE_SIZE - len);
 	}
 
-	
+	/* collect charger vars */
 	if (htc_batt_info.icharger) {
 #if 0
 		if (htc_batt_info.icharger->name)
@@ -1453,7 +1602,7 @@ static int htc_battery_show_cc_attr(struct device_attribute *attr,
 {
 	int len = 0, cc_uah = 0;
 
-	
+	/* collect gague vars */
 	if (htc_batt_info.igauge) {
 		if (htc_batt_info.igauge->get_battery_cc) {
 			htc_batt_info.igauge->get_battery_cc(&cc_uah);
@@ -1461,6 +1610,208 @@ static int htc_battery_show_cc_attr(struct device_attribute *attr,
 				"cc:%d\n", cc_uah);
 		}
 	}
+
+	return len;
+}
+
+#if 0 /* need USB team support */
+extern int workable_charging_cable(void);
+#endif
+static int htc_charger_type_attr(struct device_attribute *attr,
+					char *buf)
+{
+	int chg_type, aicl_result;
+	int standard_cable;
+	int len = 0;
+
+#if 0 /* need USB team support */
+	standard_cable = workable_charging_cable()==1? 1: 0;
+#else
+	standard_cable = 1;
+#endif
+
+	htc_batt_info.icharger->get_usb_type(&chg_type);
+
+	if (htc_batt_info.rep.charging_source==7) {
+		aicl_result = 500;
+		chg_type = DATA_UNKNOWN_CHARGER;
+	} else {
+		switch(chg_type) {
+			case POWER_SUPPLY_TYPE_UNKNOWN:
+			case POWER_SUPPLY_TYPE_BATTERY:
+				chg_type = DATA_NO_CHARGING;
+				aicl_result = 0;
+				break;
+			case POWER_SUPPLY_TYPE_USB:
+				aicl_result = 500;
+				chg_type = DATA_USB;
+				break;
+			case POWER_SUPPLY_TYPE_USB_CDP:
+				aicl_result = 1000;
+				chg_type = DATA_USB_CDP;
+				break;
+			case POWER_SUPPLY_TYPE_USB_HVDCP:
+				htc_batt_info.icharger->get_AICL(&aicl_result);
+				chg_type = DATA_QC2;
+				break;
+#if 0 /* MSM8994 does not support HVDCP_3 */
+			case POWER_SUPPLY_TYPE_USB_HVDCP_3:
+				htc_batt_info.icharger->get_AICL(&aicl_result);
+				chg_type = DATA_QC3;
+				break;
+#endif
+			case POWER_SUPPLY_TYPE_USB_DCP:
+				htc_batt_info.icharger->get_AICL(&aicl_result);
+				chg_type = DATA_AC;
+				break;
+			default:
+				htc_batt_info.icharger->get_max_iusb(&aicl_result);
+				chg_type = DATA_UNKNOWN_TYPE;
+				break;
+		}
+	}
+
+	len += scnprintf(buf + len, PAGE_SIZE - len, "charging_source=%s;iusb_current=%d;workable=%d\n",
+							htc_chr_type_data_str[chg_type], aicl_result, standard_cable);
+	return len;
+}
+
+static int htc_thermal_batt_temp_attr(struct device_attribute *attr,
+					char *buf)
+{
+	int len = 0;
+
+	len += scnprintf(buf + len, PAGE_SIZE - len, "%d\n", g_thermal_batt_temp);
+
+	return len;
+}
+
+static int htc_batt_bidata_attr(struct device_attribute *attr,
+					char *buf)
+{
+	int chg_type, len = 0;
+
+        htc_batt_info.icharger->get_usb_type(&chg_type);
+
+	if ((g_BI_data_ready & HTC_BATT_CHG_BI_BIT_CHGR) == 0
+			|| g_batt_chgr_end_batvol == 0) {
+		return len;
+	}
+
+	if (g_is_pd_charger) {
+		if (g_pd_voltage/1000 == 5)
+			chg_type = DATA_PD_5V;
+		else if (g_pd_voltage/1000 == 9)
+			chg_type = DATA_PD_9V;
+		else if (g_pd_voltage/1000 == 12)
+			chg_type = DATA_PD_12V;
+		else
+			chg_type = DATA_UNKNOWN_TYPE;
+	} else if (htc_batt_info.rep.charging_source == HTC_PWR_SOURCE_TYPE_UNKNOWN_USB) {
+		chg_type = DATA_UNKNOWN_CHARGER;
+	} else {
+		switch (chg_type) {
+			case POWER_SUPPLY_TYPE_UNKNOWN:
+			case POWER_SUPPLY_TYPE_BATTERY:
+				chg_type = DATA_NO_CHARGING;
+				break;
+			case POWER_SUPPLY_TYPE_USB:
+				chg_type = DATA_USB;
+				break;
+			case POWER_SUPPLY_TYPE_USB_CDP:
+				chg_type = DATA_USB_CDP;
+				break;
+			case POWER_SUPPLY_TYPE_USB_HVDCP:
+				chg_type = DATA_QC2;
+				break;
+#if 0 /* 8994 not support QC3 */
+			case POWER_SUPPLY_TYPE_USB_HVDCP_3:
+				chg_type = DATA_QC3;
+				break;
+#endif
+			case POWER_SUPPLY_TYPE_USB_DCP:
+				chg_type = DATA_AC;
+				break;
+			default:
+				chg_type = DATA_UNKNOWN_TYPE;
+				break;
+		}
+	}
+
+	len += scnprintf(buf + len, PAGE_SIZE - len,
+			"appID: charging_log\n"
+			"category: charging\n"
+			"action: charging\n"
+			"Attribute:\n"
+			"{type, %s}\n"
+			"{iusb, %d}\n"
+			"{ibat, %d}\n"
+			"{start_temp, %d}\n"
+			"{end_temp, %d}\n"
+			"{start_level, %d}\n"
+			"{end_level, %d}\n"
+			"{batt_vol_start, %d}\n"
+			"{batt_vol_end, %d}\n"
+			"{chg_cycle, %d}\n"
+			"{overheat, %d}\n"
+			"{batt_level, %d}\n"
+			"{batt_vol, %d}\n"
+			"{err_code, %d}\n",
+			htc_chr_type_data_str[chg_type],
+			g_batt_chgr_iusb,
+			g_batt_chgr_ibat,
+			g_batt_chgr_start_temp,
+			g_batt_chgr_end_temp,
+			g_batt_chgr_start_level,
+			g_batt_chgr_end_level,
+			g_batt_chgr_start_batvol,
+			g_batt_chgr_end_batvol,
+			g_total_level_raw,
+			g_overheat_55_sec,
+			g_batt_aging_level,
+			g_batt_aging_bat_vol,
+			0);
+
+	BATT_EMBEDDED("Charging_log:\n%s", buf);
+
+	g_batt_chgr_end_batvol = 0;
+	return len;
+}
+
+static int htc_consist_data_attr(struct device_attribute *attr,
+					char *buf)
+{
+	int len = 0;
+	struct timespec xtime = CURRENT_TIME;
+	static int data[6];
+	unsigned long currtime_s = (xtime.tv_sec * MSEC_PER_SEC + xtime.tv_nsec / NSEC_PER_MSEC)/MSEC_PER_SEC;
+
+	data[0] = STORE_MAGIC_NUM;		// magic number
+	data[1] = htc_batt_info.rep.level;	// soc
+	data[2] = 0;				// ocv_uv
+	data[3] = 0;				// cc_uah
+	data[4] = (int) currtime_s;		// current time
+	data[5] = htc_batt_info.rep.batt_temp;	// batt temperature
+
+	len += sizeof(data);
+	memcpy(buf,(char*) data, len);
+
+	return len;
+}
+
+static int htc_cycle_data_attr(struct device_attribute *attr,
+					char *buf)
+{
+	int len = 0;
+	static int data[4];
+
+	data[0] = g_total_level_raw;
+	data[1] = g_overheat_55_sec;
+	data[2] = g_batt_first_use_time;
+	data[3] = g_batt_cycle_checksum;
+
+	len += sizeof(data);
+	memcpy(buf,(char*) data, len);
 
 	return len;
 }
@@ -1481,7 +1832,7 @@ static int htc_battery_show_htc_extension_attr(struct device_attribute *attr,
 	int len = 0;
 
 	len += scnprintf(buf + len, PAGE_SIZE - len,"%d\n",
-								htc_batt_info.htc_extension);
+								htc_batt_info.rep.htc_extension);
 
 	return len;
 }
@@ -1501,6 +1852,8 @@ static int htc_batt_open(struct inode *inode, struct file *filp)
 	spin_unlock(&htc_batt_info.batt_lock);
 
 #ifdef CONFIG_ARCH_MSM8X60_LTE
+	/*Always disable cpu1 for off-mode charging.
+	 * For 8x60_LTE projects only */
 	if (board_mfg_mode() == 5)
 		cpu_down(1);
 
@@ -1521,11 +1874,16 @@ static int htc_batt_release(struct inode *inode, struct file *filp)
 
 static int htc_batt_get_battery_info(struct battery_info_reply *htc_batt_update)
 {
+	int vbus = 0, max_iusb = 0, aicl_ma = 0;
+
 	htc_batt_update->batt_vol = htc_batt_info.rep.batt_vol;
 	htc_batt_update->batt_id = htc_batt_info.rep.batt_id;
 	htc_batt_update->batt_temp = htc_batt_info.rep.batt_temp;
+/* MATT porting */
 	htc_batt_update->batt_current = htc_batt_info.rep.batt_current;
 #if 0
+	/* report the net current injection into battery no
+	 * matter charging is enable or not (may negative) */
 	htc_batt_update->batt_current = htc_batt_info.rep.batt_current -
 			htc_batt_info.rep.batt_discharg_current;
 	htc_batt_update->batt_discharg_current =
@@ -1549,6 +1907,29 @@ static int htc_batt_get_battery_info(struct battery_info_reply *htc_batt_update)
 		htc_batt_update->usb_temp = htc_batt_info.rep.usb_temp;
 		htc_batt_update->usb_overheat = htc_batt_info.rep.usb_overheat;
 	}
+
+	if (htc_batt_info.icharger &&
+				htc_batt_info.icharger->get_vbus)
+			htc_batt_info.icharger->get_vbus(&vbus);
+	htc_batt_update->vbus = vbus;
+
+	if (htc_batt_info.icharger &&
+				htc_batt_info.icharger->get_max_iusb)
+			htc_batt_info.icharger->get_max_iusb(&max_iusb);
+	htc_batt_update->max_iusb = max_iusb;
+
+	htc_batt_update->chg_limit_reason = chg_limit_reason;
+	htc_batt_update->chg_stop_reason = chg_dis_reason;
+	htc_batt_update->consistent = htc_batt_info.rep.consistent;
+
+	if (htc_batt_info.icharger &&
+				htc_batt_info.icharger->get_AICL)
+			htc_batt_info.icharger->get_AICL(&aicl_ma);
+	htc_batt_update->aicl_ma = aicl_ma;
+
+	htc_batt_update->htc_extension = htc_batt_info.rep.htc_extension;
+	htc_batt_update->level_accu = g_total_level_raw;
+
 	return 0;
 }
 
@@ -1628,6 +2009,7 @@ u32 htc_batt_getmidvalue(int32_t *value)
 	return value[len / 2];
 }
 
+/* MATT porting */
 #if 0
 static int32_t htc_batt_get_battery_adc(void)
 {
@@ -1636,7 +2018,7 @@ static int32_t htc_batt_get_battery_adc(void)
 	u32 battid_adc = 0;
 	struct battery_adc_reply adc;
 
-	
+	/* Read battery voltage adc data. */
 	ret = pm8058_htc_config_mpp_and_adc_read(
 			adc.adc_voltage,
 			ADC_REPLY_ARRAY_SIZE,
@@ -1645,7 +2027,7 @@ static int32_t htc_batt_get_battery_adc(void)
 			htc_batt_info.mpp_config->vol[PM_MPP_AIN_AMUX]);
 	if (ret)
 		goto get_adc_failed;
-	
+	/* Read battery current adc data. */
 	ret = pm8058_htc_config_mpp_and_adc_read(
 			adc.adc_current,
 			ADC_REPLY_ARRAY_SIZE,
@@ -1654,7 +2036,7 @@ static int32_t htc_batt_get_battery_adc(void)
 			htc_batt_info.mpp_config->curr[PM_MPP_AIN_AMUX]);
 	if (ret)
 		goto get_adc_failed;
-	
+	/* Read battery temperature adc data. */
 	ret = pm8058_htc_config_mpp_and_adc_read(
 			adc.adc_temperature,
 			ADC_REPLY_ARRAY_SIZE,
@@ -1663,7 +2045,7 @@ static int32_t htc_batt_get_battery_adc(void)
 			htc_batt_info.mpp_config->temp[PM_MPP_AIN_AMUX]);
 	if (ret)
 		goto get_adc_failed;
-	
+	/* Read battery id adc data. */
 	ret = pm8058_htc_config_mpp_and_adc_read(
 			adc.adc_battid,
 			ADC_REPLY_ARRAY_SIZE,
@@ -1699,6 +2081,10 @@ static void batt_regular_timer_handler(unsigned long data)
 				__func__, htc_batt_info.state);
 		htc_batt_schedule_batt_info_update();
 	}
+	/*
+	wake_lock(&htc_batt_timer.battery_lock);
+	queue_work(htc_batt_timer.batt_wq, &htc_batt_timer.batt_work);
+	*/
 }
 
 static enum alarmtimer_restart
@@ -1708,13 +2094,15 @@ batt_check_alarm_handler(struct alarm *alarm, ktime_t time)
 	return 0;
 }
 
+#define BOUNDING_RECHARGE_NORMAL        5
+#define BOUNDING_RECHARGE_ATS           20
 static int bounding_fullly_charged_level(int upperbd, int current_level)
 {
 	static int pingpong = 1;
 	int lowerbd;
 	int is_input_chg_off_by_bounding = 0;
 
-	lowerbd = upperbd - 5; 
+	lowerbd = upperbd - 5; /* 5% range */
 
 	if (lowerbd < 0)
 		lowerbd = 0;
@@ -1745,7 +2133,11 @@ static int bounding_fullly_charged_level_dis_batt_chg(int upperbd, int current_l
 	int lowerbd;
 	int is_batt_chg_off_by_bounding = 0;
 
-	lowerbd = upperbd - 5; 
+        if (g_flag_ats_limit_chg) {
+                lowerbd = upperbd - BOUNDING_RECHARGE_ATS;      // 20% range
+        } else {
+                lowerbd = upperbd - BOUNDING_RECHARGE_NORMAL;   // 5% range
+        }
 
 	if (lowerbd < 0)
 		lowerbd = 0;
@@ -1819,39 +2211,44 @@ static void batt_update_info_from_gauge(void)
 		return;
 	}
 
-	
-	
+	/* STEP 1: read basic battery info */
+	/* get voltage */
 	if (htc_batt_info.igauge->get_battery_voltage)
 		htc_batt_info.igauge->get_battery_voltage(
 				&htc_batt_info.rep.batt_vol);
-	
+	/* get current */
 	if (htc_batt_info.igauge->get_battery_current)
 		htc_batt_info.igauge->get_battery_current(
 				&htc_batt_info.rep.batt_current);
-	
+	/* get temperature */
 	if (htc_batt_info.igauge->get_battery_temperature)
 		htc_batt_info.igauge->get_battery_temperature(
 				&htc_batt_info.rep.batt_temp);
-	
+	/* get temperature fault */
 	if (htc_batt_info.igauge->is_battery_temp_fault)
 		htc_batt_info.igauge->is_battery_temp_fault(
 				&htc_batt_info.rep.temp_fault);
-	
+	/* get batt_id */
 	if (htc_batt_info.igauge->get_battery_id)
 		htc_batt_info.igauge->get_battery_id(
 				&htc_batt_info.rep.batt_id);
 
-	
+	/* get usb temperature for KDDI */
 	if (htc_batt_info.igauge->get_usb_temperature)
 			htc_batt_info.igauge->get_usb_temperature(
 				&htc_batt_info.rep.usb_temp);
 
-#if 0
-	
+	/* battery id check and cell assginment
+	htc_batt_info.bcell = htc_battery_cell_find(batt_id_raw);
+	htc_battery_cell_set_cur_cell(htc_batt_info.bcell);
+	htc_batt_info.rep.batt_id = htc_batt_info.bcell->id;
+	*/
+#if 0//FIXME
+	/* MATT: review the definition */
 	if (htc_battery_cell_get_cur_cell())
 		htc_batt_info.rep.full_bat = htc_battery_cell_get_cur_cell()->capacity;
 #else
-	
+	/* get batt capacity */
 	if (htc_batt_info.igauge->get_battery_capacity)
 		htc_batt_info.igauge->get_battery_capacity(
 				&htc_batt_info.rep.full_bat);
@@ -1860,7 +2257,7 @@ static void batt_update_info_from_gauge(void)
 	htc_batt_info.igauge->get_battery_soc(
 		&htc_batt_info.rep.level_raw);
 	htc_batt_info.rep.level = htc_batt_info.rep.level_raw;
-	
+	/* get charger ovp state */
 	if (htc_batt_info.icharger->is_ovp)
 		htc_batt_info.icharger->is_ovp(&htc_batt_info.rep.over_vchg);
 
@@ -1873,6 +2270,7 @@ inline static int is_voltage_critical_low(int voltage_mv)
 	return (voltage_mv < htc_batt_info.critical_low_voltage_mv) ? 1 : 0;
 }
 
+/*Overload defines*/
 #define CHG_ONE_PERCENT_LIMIT_PERIOD_MS	(1000 * 60)
 #define LEVEL_GAP_BETWEEN_UI_AND_RAW		3
 #define LOW_LEVEL_CURRENT_THRESOLD		500000
@@ -1898,8 +2296,8 @@ static void batt_check_overload(unsigned long time_since_last_update_ms)
 			htc_batt_info.rep.batt_current, htc_batt_info.rep.overload,
 			is_full);
 
-	
-	
+	/* CASE1: 	UI Level 100 and raw started dropping */
+	/*			set overload when raw dropped to 3	*/
 	if(htc_batt_info.rep.charging_source > 0 &&
 			htc_batt_info.rep.level == 100 &&
 			(s_pre_raw_level - htc_batt_info.rep.level_raw) > 0 &&
@@ -1907,14 +2305,19 @@ static void batt_check_overload(unsigned long time_since_last_update_ms)
 			!is_ocv_update &&
 			(htc_batt_info.rep.batt_current / 1000) >
 					htc_batt_info.overload_curr_thr_ma ){
+		time_accumulation += time_since_last_update_ms;
+		if (time_accumulation >= CHG_ONE_PERCENT_LIMIT_PERIOD_MS) {
 
-			
+			/* Treat overload is happening if UI/raw level gap > 3% */
 			if ((htc_batt_info.rep.level - htc_batt_info.rep.level_raw)
 						> LEVEL_GAP_BETWEEN_UI_AND_RAW)
 					htc_batt_info.rep.overload = 1;
+
+			time_accumulation = 0;
+		}
 	}
-	
-	
+	/* CASE2: 	UI Level > 10 and check battery discharging*/
+	/*			 for 3 mins  then set overload 			*/
 	else if ((htc_batt_info.rep.charging_source > 0) &&
 				(!is_full) &&
 				htc_batt_info.rep.level >= LOW_UI_LEVEL_THRESOLD &&
@@ -1927,7 +2330,7 @@ static void batt_check_overload(unsigned long time_since_last_update_ms)
 				} else
 					htc_batt_info.rep.overload = 1;
 
-				
+				/* Treat overload is happening if UI/raw level gap > 3% */
 				if ((htc_batt_info.rep.level - htc_batt_info.rep.level_raw)
 						>= LEVEL_GAP_BETWEEN_UI_AND_RAW)
 					htc_batt_info.rep.overload = 1;
@@ -1935,9 +2338,9 @@ static void batt_check_overload(unsigned long time_since_last_update_ms)
 				time_accumulation = 0;
 			}
 	}
-	
-	
-	
+	/* CASE3: 	UI Level < 10 and check battery discharging   */
+	/*			set overload when dischg curr > 500mA	    */
+	/*			raw level dropped by 1 % or discharing for 3 mins */
 	else if ((htc_batt_info.rep.charging_source > 0) &&
 				(!is_full) &&
 				!s_first_time &&
@@ -1945,6 +2348,8 @@ static void batt_check_overload(unsigned long time_since_last_update_ms)
 				htc_batt_info.rep.level < LOW_UI_LEVEL_THRESOLD &&
 				((htc_batt_info.rep.batt_current / 1000) >
 					htc_batt_info.overload_curr_thr_ma)) {
+			time_accumulation += time_since_last_update_ms;
+			if (time_accumulation >= CHG_ONE_PERCENT_LIMIT_PERIOD_MS) {
 					if(htc_batt_info.rep.batt_current >= LOW_LEVEL_CURRENT_THRESOLD)
 						htc_batt_info.rep.overload = 1;
 					else if((s_pre_raw_level - htc_batt_info.rep.level_raw) > 0)
@@ -1953,8 +2358,11 @@ static void batt_check_overload(unsigned long time_since_last_update_ms)
 						htc_batt_info.rep.overload = 0;
 					else
 						htc_batt_info.rep.overload = 1;
+
+					time_accumulation = 0;
+			}
 	}
-	else { 
+	else { /* Cable is removed or battery charging*/
 			s_overload_count = 0;
 			time_accumulation = 0;
 			htc_batt_info.rep.overload = 0;
@@ -1992,26 +2400,27 @@ static void batt_monitor_usb_overheat(int usb_temp)
 			}
 		}
 	}
-	else { 
+	else { /* Cable is removed */
 		htc_batt_info.rep.usb_overheat = 0;
 	}
 	first = 0;
 	pre_usb_temp = htc_batt_info.rep.usb_temp ;
 }
 #endif
-
+#if 0   // Removed for misc_partition write permission
 static void change_level_by_consistent_and_store_into_emmc(void)
 {
-	
+	/* Only execute once after consistent is done, to get consistent UI level */
 	if (get_consistent_flag) {
 		htc_batt_get_battery_ui_soc(&htc_batt_info.rep.level);
 		get_consistent_flag = 0;
+		htc_batt_info.rep.consistent = htc_batt_info.rep.level;
 	}
 
-	
+	/* To store the UI SOC into emmc while executing power off */
 	htc_batt_store_battery_ui_soc(htc_batt_info.rep.level);
 }
-
+#endif
 static void batt_check_critical_low_level(int *dec_level, int batt_current)
 {
 	int	i;
@@ -2029,7 +2438,7 @@ static void batt_check_critical_low_level(int *dec_level, int batt_current)
 
 static void adjust_store_level(int *store_level, int drop_raw, int drop_ui, int prev) {
 	int store = *store_level;
-	
+	/* To calculate next store_vale between UI and Raw level*/
 	store += drop_raw - drop_ui;
 	if (store >= 0)
 		htc_batt_info.rep.level = prev - drop_ui;
@@ -2064,6 +2473,8 @@ static void batt_level_adjust(unsigned long time_since_last_update_ms)
 	const struct battery_info_reply *prev_batt_info_rep =
 						htc_battery_core_get_batt_info_rep();
 
+	/* FIXME
+	if (prev_batt_info_rep->batt_state) */
 	if (!first) {
 		prev_level = prev_batt_info_rep->level;
 		prev_raw_level = prev_batt_info_rep->level_raw;
@@ -2083,6 +2494,10 @@ static void batt_level_adjust(unsigned long time_since_last_update_ms)
 		return;
 	}
 
+	/* In discharging case, to store the very first difference
+	 * between UI and Raw level.
+	 * In case of Overload follow the remap logic.
+	 */
 	if (((htc_batt_info.rep.charging_source == 0)
 			&& (stored_level_flag == false)) ||
 			htc_batt_info.rep.overload ) {
@@ -2094,24 +2509,38 @@ static void batt_level_adjust(unsigned long time_since_last_update_ms)
 	} else if (htc_batt_info.rep.charging_source > 0)
 		stored_level_flag = false;
 
+	/* Let it enter charging state to prevent reporting 100% directly
+	   if soc is 100% if cable is just inserted or boot up with cable in.
+	   In case of Overload follow the remap logic.*/
 	if ((!prev_batt_info_rep->charging_enabled &&
 			!((prev_batt_info_rep->charging_source == 0) &&
 				htc_batt_info.rep.charging_source > 0)) || htc_batt_info.rep.overload) {
+		/* battery discharging - level smoothen algorithm:
+		 * Rule: always report 1% before report 0%
+		 * IF VBATT < CRITICAL_LOW_VOLTAGE THEN
+		 *		drop level by 6%
+		 * ELSE
+		 * - level cannot drop over 2% in 1 minute (here use 60 + 10 sec).
+		 * - level cannot drop over 5% in 5 minute (here use 300 + 10 sec).
+		 * - level cannot drop over 3% in 60 minute.
+		 * - level cannot increase while discharging.
+		 */
 		if (time_accumulated_level_change < DISCHG_UPDATE_PERIOD_MS
 				&& !first) {
-			
+			/* level should keep the previous one */
 			BATT_LOG("%s: total_time since last batt level update = %lu ms.",
 			__func__, time_accumulated_level_change);
 			htc_batt_info.rep.level = prev_level;
 			store_level += drop_raw_level;
-
+#if 0	// Removed for misc_partition write permission
 			change_level_by_consistent_and_store_into_emmc();
+#endif
 			return;
 		}
 
 		if (is_voltage_critical_low(htc_batt_info.rep.batt_vol)) {
 			critical_low_enter = 1;
-			
+			/* batt voltage is under critical low condition */
 			if (htc_batt_info.decreased_batt_level_check)
 				batt_check_critical_low_level(&dec_level,
 					htc_batt_info.rep.batt_current);
@@ -2126,13 +2555,13 @@ static void batt_level_adjust(unsigned long time_since_last_update_ms)
 						htc_batt_info.rep.level, htc_batt_info.critical_low_voltage_mv,
 						htc_batt_info.rep.batt_current);
 		} else {
-			
-			
+			/* Always allows to drop stored 1% below 30% */
+			/* Allows to drop stored 1% when UI - Raw > 10 */
 			if ((htc_batt_info.rep.level_raw < 30) ||
 					(prev_level - prev_raw_level > 10))
 				allow_drop_one_percent_flag = true;
 
-			
+			/* Preset the UI Level as Pre-UI */
 			htc_batt_info.rep.level = prev_level;
 
 			if (time_since_last_update_ms <= ONE_PERCENT_LIMIT_PERIOD_MS) {
@@ -2165,7 +2594,7 @@ static void batt_level_adjust(unsigned long time_since_last_update_ms)
 					} else if (SIXTY_MINUTES_MS < time_since_last_update_ms) {
 						allow_suspend_drop_level = 8;
 					}
-					
+					/* allow_suspend_drop_level (4/6/8) is temporary setting, original is (1/2/3) */
 					if (allow_suspend_drop_level != 0) {
 						if (allow_suspend_drop_level <= drop_raw_level) {
 							adjust_store_level(&store_level, drop_raw_level, allow_suspend_drop_level, prev_level);
@@ -2195,6 +2624,8 @@ static void batt_level_adjust(unsigned long time_since_last_update_ms)
 						" ui:%d%%\n", store_level
 						, htc_batt_info.rep.level);
 			} else if (drop_raw_level < 0) {
+				/* soc increased in discharging state:
+				 * do not allow level increase. */
 				if (critical_low_enter) {
 					pr_warn("[BATT] remap: level increase because of"
 							" exit critical_low!\n");
@@ -2205,10 +2636,10 @@ static void batt_level_adjust(unsigned long time_since_last_update_ms)
 						" ui:%d%%\n", store_level, htc_batt_info.rep.level);
 			}
 
-			
+			/* Allow to minus additional 1% in every 5% */
 			five_digit = htc_batt_info.rep.level / 5;
 			if (htc_batt_info.rep.level != 100) {
-				
+				/* In every 5% */
 				if ((pre_five_digit <= 18) && (pre_five_digit > five_digit)) {
 					allow_drop_one_percent_flag = true;
 					pr_info("[BATT] remap: allow to drop additional 1%% at next"
@@ -2222,6 +2653,8 @@ static void batt_level_adjust(unsigned long time_since_last_update_ms)
 				pr_warn("[BATT] exit critical_low without charge!\n");
 			}
 
+			/* A. To reduce the difference between UI & SOC
+			 * while in low temperature condition & no drop_raw_level */
 			if (htc_batt_info.rep.batt_temp < 0 &&
 				drop_raw_level == 0 &&
 				store_level >= 2) {
@@ -2238,6 +2671,8 @@ static void batt_level_adjust(unsigned long time_since_last_update_ms)
 						, htc_batt_info.rep.level);
 			}
 
+			/* B. To reduce the difference between UI & SOC
+			 * while UI level <= 10%, reduce UI 2% maximum */
 			if (store_level >= 2 && prev_level <= 10) {
 				dropping_level = prev_level - htc_batt_info.rep.level;
 				if((dropping_level == 1) || (dropping_level == 0)) {
@@ -2253,6 +2688,8 @@ static void batt_level_adjust(unsigned long time_since_last_update_ms)
 						, htc_batt_info.rep.level);
 			}
 		}
+		/* always report 1% before report 0% in discharging stage
+		    for entering quick boot off first rather than real off */
 		if ((htc_batt_info.rep.level == 0) && (prev_level > 1)) {
 			htc_batt_info.rep.level = 1;
 			pr_info("[BATT] battery level forcely report %d%%"
@@ -2260,12 +2697,18 @@ static void batt_level_adjust(unsigned long time_since_last_update_ms)
 					htc_batt_info.rep.level, prev_level);
 		}
 	} else {
+		/* battery charging - level smoothen algorithm:
+		 * IF batt is not full THEN
+		 *		- restrict level less then 100
+		 * ELSE
+		 *		- set level = 100
+		 */
 		if (htc_batt_info.igauge && htc_batt_info.igauge->is_battery_full) {
 			htc_batt_info.igauge->is_battery_full(&is_full);
 			if (is_full != 0) {
 				if (htc_batt_info.smooth_chg_full_delay_min
 						&& prev_level < 100) {
-					
+					/* keep prev level while time interval is less than 180s */
 					if (time_accumulated_level_change <
 							(htc_batt_info.smooth_chg_full_delay_min
 							* CHG_ONE_PERCENT_LIMIT_PERIOD_MS)) {
@@ -2274,11 +2717,11 @@ static void batt_level_adjust(unsigned long time_since_last_update_ms)
 						htc_batt_info.rep.level = prev_level + 1;
 					}
 				} else {
-					htc_batt_info.rep.level = 100; 
+					htc_batt_info.rep.level = 100; /* update to 100% */
 				}
 			} else {
 				if (prev_level > htc_batt_info.rep.level) {
-					
+					/* Keep pre_level because overloading case didn't happen */
 					if (!htc_batt_info.rep.overload) {
 						pr_info("[BATT] pre_level=%d, new_level=%d, "
 							"level drop but overloading doesn't happen!\n",
@@ -2287,10 +2730,12 @@ static void batt_level_adjust(unsigned long time_since_last_update_ms)
 					}
 				}
 				else if (99 < htc_batt_info.rep.level && prev_level == 99)
-					htc_batt_info.rep.level = 99; 
+					htc_batt_info.rep.level = 99; /* restrict at 99% */
 				else if (prev_level < htc_batt_info.rep.level) {
 					if(time_accumulated_level_change >
 							CHG_ONE_PERCENT_LIMIT_PERIOD_MS) {
+						/* Let UI level increase at most 2% per minute, but
+						     avoid level directly jumping to 100% from 98%      */
 						if ((htc_batt_info.rep.level - prev_level) > 1
 								&& prev_level < 98)
 							htc_batt_info.rep.level = prev_level + 2;
@@ -2307,7 +2752,7 @@ static void batt_level_adjust(unsigned long time_since_last_update_ms)
 						"level would use raw level!\n",
 						prev_level, htc_batt_info.rep.level);
 				}
-				
+				/* WA: avoid battery level > limited level in charging case. */
 				if (0 < htc_batt_info.rep.full_level_dis_batt_chg &&
 						htc_batt_info.rep.full_level_dis_batt_chg < 100) {
 					if((htc_batt_info.rep.level >
@@ -2328,35 +2773,34 @@ static void batt_level_adjust(unsigned long time_since_last_update_ms)
 		allow_drop_one_percent_flag = false;
 	}
 
-	
+	/* To get the UI SOC storing in emmc while booting up at the first time*/
 	if (first)
 		schedule_delayed_work(&check_consistent_work,
 				msecs_to_jiffies(CHECK_CONSISTENT_DELAY_MS));
 
-	
+	/* store_level updates everytime in the end of battery level adjust */
 	store_level = htc_batt_info.rep.level - htc_batt_info.rep.level_raw;
 
-	
+	/* Do not power off when battery voltage over 3.4V */
 	if (htc_batt_info.rep.level == 0 && htc_batt_info.rep.batt_vol > 3400 && htc_batt_info.rep.batt_temp > 0) {
 		pr_info("Not reach shutdown voltage, vol:%d\n", htc_batt_info.rep.batt_vol);
 		htc_batt_info.rep.level = 1;
 		store_level = 1;
 	}
-
+#if 0   // Removed for misc_partition write permission
 	change_level_by_consistent_and_store_into_emmc();
-
+#endif
 	if (htc_batt_info.rep.level != prev_level)
 		time_accumulated_level_change = 0;
 
 	first = 0;
 }
 
-
 static void batt_update_limited_charge(void)
 {
 	static bool high_temp_reached = FALSE;
 	if (htc_batt_info.state & STATE_EARLY_SUSPEND) {
-		
+		/* screen OFF */
 		if (htc_batt_info.rep.batt_temp >= SMALL_CHG_TEMP_HEAVY_HIGH) {
 			high_temp_reached = TRUE;
 			set_limit_charge_with_reason(true, HTC_BATT_CHG_LIMIT_BIT_THRML, RESTRICT_SOFT);
@@ -2366,11 +2810,11 @@ static void batt_update_limited_charge(void)
 			high_temp_reached = FALSE;
 			set_limit_charge_with_reason(false, HTC_BATT_CHG_LIMIT_BIT_THRML, RESTRICT_NONE);
 		} else {
-			
+			/* keep */
 		}
 	} else {
 #if !(defined(CONFIG_MACH_B2_WLJ))
-		
+		/* screen ON */
 		if (htc_batt_info.rep.batt_temp >= SMALL_CHG_TEMP_HEAVY_HIGH) {
 			high_temp_reached = TRUE;
 			set_limit_charge_with_reason(true, HTC_BATT_CHG_LIMIT_BIT_THRML, RESTRICT_HEAVY);
@@ -2386,9 +2830,11 @@ static void batt_update_limited_charge(void)
 			set_limit_charge_with_reason(false, HTC_BATT_CHG_LIMIT_BIT_THRML, RESTRICT_NONE);
 		}
 		else {
-			
+			/* keep */
 		}
 #else
+		/* KDDI has smart charging algo for screen ON case,
+			so disable thermal migration */
 		set_limit_charge_with_reason(false, HTC_BATT_CHG_LIMIT_BIT_THRML, RESTRICT_HEAVY);
 #endif
 	}
@@ -2397,23 +2843,23 @@ static void batt_update_limited_charge(void)
 static void batt_update_limited_input_current(void)
 {
 	if (htc_batt_info.state & STATE_EARLY_SUSPEND) {
-		
+		/* screen OFF */
 		if(iusb_limit_reason & HTC_BATT_CHG_LIMIT_BIT_TALK) {
-			
+			/* do nothing */
 		} else if (htc_batt_info.rep.charging_source > HTC_PWR_SOURCE_TYPE_BATT) {
-			
+			/* set false while screen off, no limitation in screen off */
 			if (iusb_limit_reason & HTC_BATT_CHG_LIMIT_BIT_KDDI)
 				set_limit_input_current_with_reason(false, HTC_BATT_CHG_LIMIT_BIT_KDDI);
 		}
 	} else {
-		
+		/* screen ON */
 		if(iusb_limit_reason & HTC_BATT_CHG_LIMIT_BIT_TALK) {
-			
+			/* do nothing */
 		} else if (htc_batt_info.rep.charging_source > HTC_PWR_SOURCE_TYPE_BATT) {
-			
+			/* only set when navi reason set */
 			if (iusb_limit_reason & HTC_BATT_CHG_LIMIT_BIT_NAVI)
 				set_limit_input_current_with_reason(true, HTC_BATT_CHG_LIMIT_BIT_NAVI);
-			
+			/* always set true while screen on*/
 			set_limit_input_current_with_reason(true, HTC_BATT_CHG_LIMIT_BIT_KDDI);
 		}
 	}
@@ -2430,16 +2876,16 @@ static void sw_safety_timer_check(unsigned long time_since_last_update_ms)
 		sw_stimer_counter = 0;
 	}
 
-	
+	/* it stop charging now, cleaer ext charger safety timer as well */
 	if(!htc_batt_info.rep.charging_enabled)
 		sw_stimer_counter = 0;
 
-	
+	/* if in charging, sum up time stamp. If not, clear the sum up */
 	if((latest_chg_src == HTC_PWR_SOURCE_TYPE_AC) || (latest_chg_src == HTC_PWR_SOURCE_TYPE_9VAC))
 	{
 		pr_info("%s enter\n", __func__);
 
-		
+		/* safety timer is hit but not cable out yet; ignore below counting */
 		if(sw_stimer_fault)
 		{
 			pr_info("%s safety timer expired\n", __func__);
@@ -2448,15 +2894,15 @@ static void sw_safety_timer_check(unsigned long time_since_last_update_ms)
 
 		sw_stimer_counter +=  time_since_last_update_ms;
 
-		
+		/* see if safety timer 16 hours is hit */
 		if(sw_stimer_counter >= HTC_SAFETY_TIME_16_HR_IN_MS)
 		{
 			pr_info("%s sw_stimer_counter expired, count:%lu ms", __func__, sw_stimer_counter);
 
-			
+			/* stop charging by set fault bit to 1*/
 			sw_stimer_fault = 1;
 
-			
+			/* reset timer */
 			sw_stimer_counter = 0;
 		}
 		else
@@ -2469,36 +2915,46 @@ static void sw_safety_timer_check(unsigned long time_since_last_update_ms)
 
 void update_htc_extension_state(void)
 {
-	
+	/* check UNKONWN_USB_CHARGER */
 	if (HTC_PWR_SOURCE_TYPE_UNKNOWN_USB == htc_batt_info.rep.charging_source)
-		htc_batt_info.htc_extension |= HTC_EXT_UNKNOWN_USB_CHARGER;
+		htc_batt_info.rep.htc_extension |= HTC_EXT_UNKNOWN_USB_CHARGER;
 	else
-		htc_batt_info.htc_extension &= ~HTC_EXT_UNKNOWN_USB_CHARGER;
-	
+		htc_batt_info.rep.htc_extension &= ~HTC_EXT_UNKNOWN_USB_CHARGER;
+	/* check CHARGER_UNDER_RATING */
 	if (charger_under_rating &&
 		HTC_PWR_SOURCE_TYPE_AC == htc_batt_info.rep.charging_source)
-		htc_batt_info.htc_extension |= HTC_EXT_CHG_UNDER_RATING;
+		htc_batt_info.rep.htc_extension |= HTC_EXT_CHG_UNDER_RATING;
 	else
-		htc_batt_info.htc_extension &= ~HTC_EXT_CHG_UNDER_RATING;
-	
+		htc_batt_info.rep.htc_extension &= ~HTC_EXT_CHG_UNDER_RATING;
+	/* check CHARGER_SAFTY_TIMEOUT */
 	if (charger_safety_timeout || sw_stimer_fault)
-		htc_batt_info.htc_extension |= HTC_EXT_CHG_SAFTY_TIMEOUT;
+		htc_batt_info.rep.htc_extension |= HTC_EXT_CHG_SAFTY_TIMEOUT;
 	else
-		htc_batt_info.htc_extension &= ~HTC_EXT_CHG_SAFTY_TIMEOUT;
+		htc_batt_info.rep.htc_extension &= ~HTC_EXT_CHG_SAFTY_TIMEOUT;
 
 	if (batt_full_eoc_stop != 0)
-		htc_batt_info.htc_extension |= HTC_EXT_CHG_FULL_EOC_STOP;
+		htc_batt_info.rep.htc_extension |= HTC_EXT_CHG_FULL_EOC_STOP;
 	else
-		htc_batt_info.htc_extension &= ~HTC_EXT_CHG_FULL_EOC_STOP;
+		htc_batt_info.rep.htc_extension &= ~HTC_EXT_CHG_FULL_EOC_STOP;
 
 	if(htc_batt_info.icharger && htc_batt_info.icharger->is_bad_cable_used){
 		int isBadCable = 0;
 		htc_batt_info.icharger->is_bad_cable_used(&isBadCable);
 		if(isBadCable == 1)
-			htc_batt_info.htc_extension |= HTC_EXT_BAD_CABLE_USED;
+			htc_batt_info.rep.htc_extension |= HTC_EXT_BAD_CABLE_USED;
 		else
-			htc_batt_info.htc_extension &= ~HTC_EXT_BAD_CABLE_USED;
+			htc_batt_info.rep.htc_extension &= ~HTC_EXT_BAD_CABLE_USED;
 	}
+
+	if (htc_batt_info.icharger && htc_batt_info.icharger->is_quick_charger_used) {
+		bool isQC = 0;
+		htc_batt_info.icharger->is_quick_charger_used(&isQC);
+		if (isQC)
+			htc_batt_info.rep.htc_extension |= HTC_EXT_QUICK_CHARGER_USED;
+		else
+			htc_batt_info.rep.htc_extension &= ~HTC_EXT_QUICK_CHARGER_USED;
+	}
+
 }
 
 static void batt_error_handle(void)
@@ -2506,7 +2962,7 @@ static void batt_error_handle(void)
 	if (htc_batt_info.icharger &&
 			htc_batt_info.icharger->is_charger_error_handle)
 	{
-		
+		/* WA: set HC mode in USBIN mode when vbus value & pmic reg not match */
 		if (htc_batt_info.icharger->is_charger_error_handle()) {
 			if (htc_batt_info.icharger &&
 					htc_batt_info.icharger->usbin_mode_charge) {
@@ -2519,7 +2975,7 @@ static void batt_error_handle(void)
 
 	if (htc_batt_info.icharger &&
 			htc_batt_info.icharger->reset_chg_en_when_chg_error)
-		
+		/* WA: set HC mode in USBIN mode when vbus value & pmic reg not match */
 		htc_batt_info.icharger->reset_chg_en_when_chg_error();
 }
 
@@ -2530,7 +2986,7 @@ static void cable_status_check(int chg_src, int chg_en)
 				htc_batt_info.icharger->is_cable_exist_check &&
 				htc_batt_info.icharger->is_cable_exist_check())
 		{
-			
+			/* Force re-do cable detection */
 			if (htc_batt_info.icharger->fake_chg_src_detect) {
 				pr_info("%s:fake_chg_src_detect() called.\n",
 						__func__);
@@ -2540,8 +2996,89 @@ static void cable_status_check(int chg_src, int chg_en)
 	}
 }
 
+static void calculate_batt_cycle_info(unsigned long time_since_last_update_ms)
+{
+	const struct battery_info_reply *prev_batt_info_rep =
+						htc_battery_core_get_batt_info_rep();
+	time_t t = g_batt_first_use_time;
+	struct tm timeinfo;
+	const unsigned long timestamp_commit = 1439009536; // timestamp of push this commit
+	struct timeval rtc_now;
+
+	do_gettimeofday(&rtc_now);
+
+	/* level_raw change times */
+	if ( prev_batt_info_rep->charging_source && ( htc_batt_info.rep.level_raw > prev_batt_info_rep->level_raw ) )
+		g_total_level_raw = g_total_level_raw + ( htc_batt_info.rep.level_raw - prev_batt_info_rep->level_raw );
+
+	/* battery overheat time */
+	if ( prev_batt_info_rep->batt_temp >= 550 )
+		g_overheat_55_sec += time_since_last_update_ms/1000;
+
+	/* battery first use time */
+	if (((g_batt_first_use_time < timestamp_commit) || (g_batt_first_use_time > rtc_now.tv_sec))
+									&& ( timestamp_commit < rtc_now.tv_sec )) {
+		g_batt_first_use_time = rtc_now.tv_sec;
+#if 0	// Removed for misc_partition write permission
+		emmc_misc_write(g_batt_first_use_time, HTC_BATT_FIRST_USE_TIME);
+#endif
+		BATT_LOG("%s: g_batt_first_use_time modify!", __func__);
+	}
+
+	/* calculate checksum */
+	g_batt_cycle_checksum = g_batt_first_use_time + g_total_level_raw + g_overheat_55_sec;
+
+	t = g_batt_first_use_time;
+	time_to_tm(t, 0, &timeinfo);
+
+	BATT_LOG("%s: g_batt_first_use_time = %04ld-%02d-%02d %02d:%02d:%02d, g_overheat_55_sec = %u, g_total_level_raw = %u",
+		__func__, timeinfo.tm_year+1900, timeinfo.tm_mon+1, timeinfo.tm_mday,
+		timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
+		g_overheat_55_sec, g_total_level_raw);
+
+#if 0   // Removed for misc_partition write permission
+	if (g_total_level_raw % 50 == 0) {
+		BATT_LOG("%s: save batt cycle data every 50%%", __func__);
+		/* write batt cycle data to emmc */
+		emmc_misc_write(g_total_level_raw, HTC_BATT_TOTAL_LEVELRAW);
+		emmc_misc_write(g_overheat_55_sec, HTC_BATT_OVERHEAT_MSEC);
+		emmc_misc_write(g_batt_cycle_checksum, HTC_BATT_CYCLE_CHECKSUM);
+	}
+#endif
+}
+
+static void read_batt_cycle_info(void)
+{
+	struct timeval rtc_now;
+	unsigned int checksum_now;
+
+	do_gettimeofday(&rtc_now);
+
+	if (htc_batt_info.igauge && htc_batt_info.igauge->get_batt_cycle)
+		htc_batt_info.igauge->get_batt_cycle(&g_total_level_raw, &g_overheat_55_sec, &g_batt_first_use_time, &g_batt_cycle_checksum);
+
+	BATT_LOG("%s: (read from devtree) g_batt_first_use_time = %u, g_overheat_55_sec = %u, g_total_level_raw = %u, g_batt_cycle_checksum = %u",
+		__func__, g_batt_first_use_time, g_overheat_55_sec, g_total_level_raw, g_batt_cycle_checksum);
+
+	checksum_now = g_batt_first_use_time + g_total_level_raw + g_overheat_55_sec;
+
+	if ((checksum_now != g_batt_cycle_checksum) || (g_batt_cycle_checksum == 0)) {
+		BATT_LOG("%s: Checksum error: reset battery cycle data.", __func__);
+		g_batt_first_use_time = rtc_now.tv_sec;
+		g_overheat_55_sec = 0;
+		g_total_level_raw = 0;
+#if 0   // Removed for misc_partition write permission
+		emmc_misc_write(g_batt_first_use_time, HTC_BATT_FIRST_USE_TIME);
+#endif
+		BATT_LOG("%s: g_batt_first_use_time = %u, g_overheat_55_sec = %u, g_total_level_raw = %u",
+			__func__, g_batt_first_use_time, g_overheat_55_sec, g_total_level_raw);
+	}
+}
+
 #define HTC_BATTERY_CELL_ID_UNKNOWN	(255)
 #define HTC_BATTERY_CELL_ID_DEVELOP	(254)
+#define THERMAL_BATT_TEMP_UPDATE_TIME_THRES	1800 // MIN 30min
+#define THERMAL_BATT_TEMP_UPDATE_TIME_MAX	3610 // MAX 60min+10s tolarance
 static void batt_worker(struct work_struct *work)
 {
 	static int first = 1;
@@ -2555,18 +3092,21 @@ static void batt_worker(struct work_struct *work)
 	int prev_chg_src;
 	unsigned long time_since_last_update_ms;
 	unsigned long cur_jiffies;
+	static struct timeval s_thermal_batt_update_time = { 0, 0 };
+	struct timeval rtc_now;
+	static bool batt_chgr_start_flag = false;
 
-	
+	/* STEP 1: print out and reset total_time since last update */
 	cur_jiffies = jiffies;
 	time_since_last_update_ms = htc_batt_timer.total_time_ms +
 		((cur_jiffies - htc_batt_timer.batt_system_jiffies) * MSEC_PER_SEC / HZ);
 	pr_info("%s: total_time since last batt update = %lu ms.\n",
 				__func__, time_since_last_update_ms);
-	htc_batt_timer.total_time_ms = 0; 
+	htc_batt_timer.total_time_ms = 0; /* reset total time */
 	htc_batt_timer.batt_system_jiffies = cur_jiffies;
 
-	
-	
+	/* STEP 2: setup next batt uptate timer (can put in the last step)*/
+	/* MATT move del timer here. TODO: move into set_check timer */
 	del_timer_sync(&htc_batt_timer.batt_timer);
 	batt_set_check_timer(htc_batt_timer.time_out);
 
@@ -2576,32 +3116,34 @@ static void batt_worker(struct work_struct *work)
 	htc_batt_timer.batt_critical_alarm_counter = 0;
 #endif
 
-	
+	/* STEP 3: update charging_source */
 	prev_chg_src = htc_batt_info.rep.charging_source;
 	htc_batt_info.rep.charging_source = latest_chg_src;
 
-	
+	/* STEP 4: fresh battery information from gauge/charger */
 	batt_update_info_from_gauge();
 	batt_update_info_from_charger();
 
-	
+	/* STEP: update cable source */
 	cable_source = htc_batt_info.rep.charging_source;
 
-	
-	if(htc_batt_info.rep.charging_source < CHARGER_MHL_UNKNOWN)
+	/* STEP: Error handling by changing USBIN mode */
+	/*       Do not run error handling if pwrsrc is disabled */
+	if (htc_batt_info.rep.charging_source < CHARGER_MHL_UNKNOWN &&
+			prev_pwrsrc_enabled == 1)
 		batt_error_handle();
 
-	
+	/* STEP: battery level smoothen adjustment */
 	batt_level_adjust(time_since_last_update_ms);
 
-	
-	if(htc_batt_info.igauge->ready
+	/* STEP: Check whether batt_state can be set */
+	if (htc_batt_info.igauge->ready
 			&& htc_batt_info.icharger->ready
 			&& checked_consistent_flag
 			&& !(htc_batt_info.rep.batt_state))
 		htc_batt_info.rep.batt_state = 1;
 
-	
+	/* STEP: force level=0 to trigger userspace shutdown */
 	if (critical_shutdown ||
 		(htc_batt_info.force_shutdown_batt_vol &&
 		htc_batt_info.rep.batt_vol < htc_batt_info.force_shutdown_batt_vol)) {
@@ -2612,7 +3154,7 @@ static void batt_worker(struct work_struct *work)
 		schedule_delayed_work(&shutdown_work,
 				msecs_to_jiffies(BATT_CRITICAL_VOL_SHUTDOWN_DELAY_MS));
 	}
-	
+	/* STEP: Set voltage alarm again if level is increased after charging */
 	if (critical_alarm_level < 0 && prev_chg_src > 0 &&
 			htc_batt_info.rep.charging_source == HTC_PWR_SOURCE_TYPE_BATT) {
 		pr_info("[BATT] critical_alarm_level: %d -> %d\n",
@@ -2621,14 +3163,13 @@ static void batt_worker(struct work_struct *work)
 		critical_alarm_level_set = critical_alarm_level + 1;
 	}
 
-	
+	/* STEP: Update limited charge */
 	batt_update_limited_charge();
 
-	
+	/* STEP: Check if overloading is happeneed during charging */
 	batt_check_overload(time_since_last_update_ms);
 
-
-	
+	/* check if aicl deglitch wa check required around Vbatt 4.0V*/
 	if(htc_batt_info.icharger &&
 	   htc_batt_info.icharger->set_aicl_deglitch_wa_check &&
 	   htc_batt_info.rep.charging_source > 0 &&
@@ -2637,7 +3178,7 @@ static void batt_worker(struct work_struct *work)
 		htc_batt_info.icharger->set_aicl_deglitch_wa_check();
 	}
 
-	
+	/* check ext charger's safety timer */
 	if (need_sw_stimer)
 	{
 		sw_safety_timer_check(time_since_last_update_ms);
@@ -2646,7 +3187,7 @@ static void batt_worker(struct work_struct *work)
 	pr_debug("[BATT] context_state=0x%x, suspend_highfreq_check_reason=0x%x\n",
 			context_state, suspend_highfreq_check_reason);
 
-	
+	/* STEP 4.1 determine if need to change 5v output , for mhl dongle or usb host */
 	if (htc_batt_info.icharger &&
 			htc_batt_info.icharger->enable_5v_output)
 	{
@@ -2658,13 +3199,23 @@ static void batt_worker(struct work_struct *work)
 		pr_info("[BATT] enable_5v_output: %d\n", htc_ext_5v_output_now);
 	}
 
-	
+	/* STEP: update htc_extension state */
 	update_htc_extension_state();
 
+	/* STEP 5: set the charger contorl depends on current status
+	   batt id, batt temp, batt eoc, full_level
+	   if charging source exist, determine charging_enable */
 	if ((int)htc_batt_info.rep.charging_source > 0) {
-		
+
+		if (!batt_chgr_start_flag){
+			do_gettimeofday(&rtc_now);
+			gs_batt_chgr_start_time = rtc_now;
+			batt_chgr_start_flag = true;
+		}
+
+		/*  STEP 4.1. check and update chg_dis_reason */
 		if (htc_batt_info.rep.batt_id == HTC_BATTERY_CELL_ID_UNKNOWN)
-			chg_dis_reason |= HTC_BATT_CHG_DIS_BIT_ID; 
+			chg_dis_reason |= HTC_BATT_CHG_DIS_BIT_ID; /* for disable charger */
 		else
 			chg_dis_reason &= ~HTC_BATT_CHG_DIS_BIT_ID;
 
@@ -2716,26 +3267,26 @@ static void batt_worker(struct work_struct *work)
 		else
 			chg_dis_reason &= ~HTC_BATT_CHG_DIS_BIT_OVP;
 
-		
+		/* STEP 5.2.1 determin pwrsrc_eanbled for charger control */
 		if (pwrsrc_dis_reason)
 			pwrsrc_enabled = 0;
 		else
 			pwrsrc_enabled = 1;
 
-		
+		/* STEP 5.2.2 determin charging_eanbled for charger control */
 		if (chg_dis_reason & chg_dis_control_mask)
 			charging_enabled = HTC_PWR_SOURCE_TYPE_BATT;
 		else
 			charging_enabled = htc_batt_info.rep.charging_source;
 
-		
+		/* STEP 5.2.3 determin charging_eanbled for userspace */
 		if (chg_dis_reason & chg_dis_active_mask)
 			htc_batt_info.rep.charging_enabled = HTC_PWR_SOURCE_TYPE_BATT;
 		else
 			htc_batt_info.rep.charging_enabled =
 										htc_batt_info.rep.charging_source;
 
-		
+		/* STEP 5.3. control charger if state changed */
 		BATT_EMBEDDED("[BATT] prev_chg_src=%d, prev_chg_en=%d,"
 				" chg_dis_reason/control/active=0x%x/0x%x/0x%x,"
 				" chg_limit_reason=0x%x,"
@@ -2752,7 +3303,7 @@ static void batt_worker(struct work_struct *work)
 					iusb_limit_reason,
 					pwrsrc_dis_reason, prev_pwrsrc_enabled,
 					context_state,
-					htc_batt_info.htc_extension,
+					htc_batt_info.rep.htc_extension,
 					ftm_charger_control_flag,
 					safety_timer_disable_flag);
 		if (charging_enabled != prev_charging_enabled ||
@@ -2774,7 +3325,7 @@ static void batt_worker(struct work_struct *work)
 				}
 			}
 
-			
+			/* re-config charger when state changes */
 			if (prev_chg_src != htc_batt_info.rep.charging_source ||
 					prev_ftm_charger_control_flag != ftm_charger_control_flag ||
 					first) {
@@ -2824,11 +3375,16 @@ static void batt_worker(struct work_struct *work)
 			}
 		}
 	} else {
-		
+		/* TODO: check if we need to enable batfet while unplugged */
 		if (prev_chg_src != htc_batt_info.rep.charging_source || first) {
-			chg_dis_reason = 0; 
-			charging_enabled = 0; 
-			pwrsrc_enabled = 0; 
+			g_BI_data_ready &= ~HTC_BATT_CHG_BI_BIT_CHGR;
+			batt_chgr_start_flag = false;
+			g_batt_chgr_start_temp = 0;
+			g_batt_chgr_start_level = 0;
+			g_batt_chgr_start_batvol = 0;
+			chg_dis_reason = 0; /* reset on charger out */
+			charging_enabled = 0; /* disable batfet */
+			pwrsrc_enabled = 0; /* disable power source for MHL initialize */
 			BATT_EMBEDDED("set_pwrsrc_and_charger_enable(%d, %d, %d)",
 						HTC_PWR_SOURCE_TYPE_BATT,
 						charging_enabled,
@@ -2847,7 +3403,7 @@ static void batt_worker(struct work_struct *work)
 								HTC_PWR_SOURCE_TYPE_BATT,
 								charging_enabled, pwrsrc_enabled);
 			}
-			
+			/* update to userspace charging_enabled state */
 			htc_batt_info.rep.charging_enabled =
 								htc_batt_info.rep.charging_source;
 		}
@@ -2857,15 +3413,15 @@ static void batt_worker(struct work_struct *work)
 	batt_update_limited_charge_timer(charging_enabled);
 #endif
 
-	
+	/* STEP: Update limited input current */
 	batt_update_limited_input_current();
 
-	
+	/* WA: double check cable status in discharging case. */
 	if(htc_batt_info.rep.charging_source < CHARGER_MHL_UNKNOWN)
 		cable_status_check(htc_batt_info.rep.charging_source,
 								htc_batt_info.rep.charging_enabled);
 
-	
+	/* STEP: Disable/Enable safety timer by file node */
 	if (htc_batt_info.icharger && htc_batt_info.icharger->set_safety_timer_disable) {
 		if (prev_safety_timer_disable_flag != safety_timer_disable_flag) {
 			htc_batt_info.icharger->set_safety_timer_disable(safety_timer_disable_flag);
@@ -2873,19 +3429,31 @@ static void batt_worker(struct work_struct *work)
 		prev_safety_timer_disable_flag = safety_timer_disable_flag;
 	}
 
-	
+	/* STEP: check and quick-boot mode power consumption */
 	if(qb_mode_enter)
 		batt_qb_mode_pwr_consumption_check(time_since_last_update_ms);
 
-	
+	/* MATT:TODO STEP: get back charger status */
 	if (htc_batt_info.icharger) {
+		/*
+		 pm8921 FSM is not changed immediately
+		htc_batt_info.icharger->get_charging_enabled(
+				&htc_batt_info.rep.charging_enabled);
+		*/
 		htc_batt_info.icharger->dump_all();
 	}
+	/* use notify to set batt_state=1
+	htc_batt_info.rep.batt_state = 1; */
 
-	
+	/* STEP: update & print battery cycle information */
+	if (first)
+		 read_batt_cycle_info();
+	calculate_batt_cycle_info(time_since_last_update_ms);
+
+	/* STEP: update change to userspace via batt_core */
 	htc_battery_core_update_changed();
 
-	
+	/* STEP: check and set voltage alarm */
 	if (0 <= critical_alarm_level &&
 					critical_alarm_level < critical_alarm_level_set) {
 		critical_alarm_level_set = critical_alarm_level;
@@ -2900,14 +3468,59 @@ static void batt_worker(struct work_struct *work)
 	prev_pwrsrc_enabled = pwrsrc_enabled;
 	prev_ftm_charger_control_flag = ftm_charger_control_flag;
 
+	/* Disable charger when entering FTM mode only in a MFG ROM
+	 * htc_battery_pwrsrc_disable would change pwrsrc_enabled, so
+	 * it needs to be put in the bottom of batt_worker.
+	 */
 	if (!strcmp(htc_get_bootmode(),"ftm") && first == 1
 			&& (of_get_property(of_chosen, "is_mfg_build", NULL))) {
 		pr_info("%s: Under FTM mode, disable charger first.", __func__);
-		
+		/* Set charger_control to DISABLE_PWRSRC */
 		htc_battery_pwrsrc_disable();
 	}
 
 	first = 0;
+
+	/* BI Data Thermal Battery Temperaturee */
+	do_gettimeofday(&rtc_now);
+	if (((rtc_now.tv_sec - s_thermal_batt_update_time.tv_sec) > THERMAL_BATT_TEMP_UPDATE_TIME_THRES)
+			&& ((rtc_now.tv_sec - s_thermal_batt_update_time.tv_sec) < THERMAL_BATT_TEMP_UPDATE_TIME_MAX)) {
+		pr_info("[BATT][THERMAL] Update period: %ld, batt_temp = %d.\n",
+			(long)(rtc_now.tv_sec - s_thermal_batt_update_time.tv_sec), htc_batt_info.rep.batt_temp);
+		g_thermal_batt_temp = htc_batt_info.rep.batt_temp;
+	}
+	s_thermal_batt_update_time = rtc_now;
+
+	if (batt_chgr_start_flag && (g_batt_chgr_start_batvol == 0)) {
+		g_batt_chgr_start_temp = htc_batt_info.rep.batt_temp;
+		g_batt_chgr_start_level = htc_batt_info.rep.level_raw;
+		g_batt_chgr_start_batvol = htc_batt_info.rep.batt_vol;
+	}
+
+	if ((g_batt_aging_bat_vol == 0) || (htc_batt_info.rep.level_raw < g_batt_aging_level)) {
+		g_batt_aging_bat_vol = htc_batt_info.rep.batt_vol;
+		g_batt_aging_level = htc_batt_info.rep.level_raw;
+	}
+
+	if ((g_BI_data_ready & HTC_BATT_CHG_BI_BIT_CHGR) == 0) {
+		if (batt_chgr_start_flag) {
+			if ((rtc_now.tv_sec - gs_batt_chgr_start_time.tv_sec) > BI_BATT_CHGE_CHECK_TIME_THRES)
+				gs_batt_chgr_start_time = rtc_now;
+			else if ((rtc_now.tv_sec - gs_batt_chgr_start_time.tv_sec) > BI_BATT_CHGE_UPDATE_TIME_THRES) {
+				g_batt_chgr_end_temp = htc_batt_info.rep.batt_temp;
+				g_batt_chgr_end_level = htc_batt_info.rep.level_raw;
+				g_batt_chgr_end_batvol = htc_batt_info.rep.batt_vol;
+				g_batt_chgr_ibat = htc_batt_info.rep.batt_current;
+				if (htc_batt_info.icharger &&
+						htc_batt_info.icharger->get_max_iusb)
+					htc_batt_info.icharger->get_max_iusb(&g_batt_chgr_iusb);
+				g_BI_data_ready |= HTC_BATT_CHG_BI_BIT_CHGR;
+				BATT_EMBEDDED("Trigger batt_chgr event.");
+			}
+		}
+	}
+
+	g_pre_total_level_raw = g_total_level_raw;
 
 	wake_unlock(&htc_batt_timer.battery_lock);
 	BATT_EMBEDDED("[BATT] %s: done\n", __func__);
@@ -2983,7 +3596,7 @@ static long htc_batt_ioctl(struct file *filp,
 			htc_batt_info.rep.level);
 
 #ifdef CONFIG_HTC_BATT_ALARM
-		
+		/* Set a 3V voltage alarm when screen is on */
 		if (screen_state == 1) {
 			if (battery_vol_alarm_mode !=
 				BATT_ALARM_CRITICAL_MODE)
@@ -3017,6 +3630,15 @@ static long htc_batt_ioctl(struct file *filp,
 		htc_batt_timer.batt_alarm_status = 0;
 		htc_batt_timer.batt_alarm_enabled = alarm_data.enable;
 
+/* MATT porting
+#ifdef CONFIG_HTC_BATT_ALARM
+#else
+		ret = batt_alarm_config(alarm_data.lower_threshold,
+				alarm_data.upper_threshold);
+		if (ret)
+			BATT_ERR("batt alarm config failed!");
+#endif
+*/
 
 		BATT_LOG("Set lower threshold: %d, upper threshold: %d, "
 			"Enabled:%u.", alarm_data.lower_threshold,
@@ -3024,7 +3646,7 @@ static long htc_batt_ioctl(struct file *filp,
 		break;
 	}
 	case HTC_BATT_IOCTL_SET_ALARM_TIMER_FLAG: {
-		
+		/* alarm flag could be reset by cable. */
 		unsigned int flag;
 		if (copy_from_user(&flag, (void *)arg, sizeof(unsigned int))) {
 			BATT_ERR("Set timer type into alarm failed!");
@@ -3052,13 +3674,14 @@ static void check_consistent_worker(struct work_struct *work)
 			htc_batt_info.igauge->check_consistent)
 		get_consistent_flag = htc_batt_info.igauge->check_consistent();
 
-	
+	/* Set checked flag no matter what the consistent result is set or not */
 	checked_consistent_flag = 1;
 
-	
+	/* schedule batt_worker again to update UI level by consistent result */
 	htc_batt_schedule_batt_info_update();
 }
 
+/* shutdown worker */
 static void shutdown_worker(struct work_struct *work)
 {
 	BATT_LOG("shutdown device");
@@ -3082,10 +3705,11 @@ static void fake_src_detect_worker(struct work_struct *work)
 	}
 }
 
+/*  MBAT_IN interrupt handler	*/
 static void mbat_in_func(struct work_struct *work)
 {
 #if defined(CONFIG_MACH_RUBY) || defined(CONFIG_MACH_HOLIDAY) || defined(CONFIG_MACH_VIGOR)
-	
+	/* add sw debounce */
 #define LTE_GPIO_MBAT_IN (61)
 	if (gpio_get_value(LTE_GPIO_MBAT_IN) == 0) {
 		pr_info("re-enable MBAT_IN irq!! due to false alarm\n");
@@ -3099,6 +3723,7 @@ static void mbat_in_func(struct work_struct *work)
 	machine_power_off();
 
 }
+/* MATT porting */
 #if 0
 static irqreturn_t mbat_int_handler(int irq, void *data)
 {
@@ -3110,6 +3735,7 @@ static irqreturn_t mbat_int_handler(int irq, void *data)
 
 	return IRQ_HANDLED;
 }
+/*  MBAT_IN interrupt handler end   */
 #endif
 
 const struct file_operations htc_batt_fops = {
@@ -3184,7 +3810,7 @@ static void htc_battery_late_resume(struct early_suspend *h)
 #endif
 	htc_batt_schedule_batt_info_update();
 }
-#endif 
+#endif /* CONFIG_HAS_EARLYSUSPEND */
 
 #define CHECH_TIME_TOLERANCE_MS	(1000)
 static int htc_battery_prepare(struct device *dev)
@@ -3215,13 +3841,18 @@ static int htc_battery_prepare(struct device *dev)
 
 	interval = ktime_set(check_time - htc_batt_timer.total_time_ms / 1000, 0);
 	next_alarm_sec = div_s64(interval.tv64, NSEC_PER_SEC);
-	
+	/* check if alarm is over time or in 1 second near future */
 	if (next_alarm_sec <= 1) {
 		BATT_LOG("%s: passing time:%lu ms, trigger batt_work immediately."
 			"(suspend_highfreq_check_reason=0x%x)", __func__,
 			htc_batt_timer.total_time_ms,
 			suspend_highfreq_check_reason);
 		htc_batt_schedule_batt_info_update();
+		/* interval = ktime_set(check_time, 0);
+		next_alarm = ktime_add(alarm_get_elapsed_realtime(), interval);
+		alarm_start_range(&htc_batt_timer.batt_check_wakeup_alarm,
+					next_alarm, ktime_add(next_alarm, slack));
+		*/
 		return -EBUSY;
 	}
 
@@ -3265,6 +3896,10 @@ static void htc_battery_complete(struct device *dev)
 
 	check_time -= CHECH_TIME_TOLERANCE_MS;
 
+	/*
+	 * When kernel resumes, battery driver should check total time to
+	 * decide if do battery information update or just ignore.
+	 */
 	if (htc_batt_timer.total_time_ms >= check_time ||
 			(htc_batt_info.state & STATE_WORKQUEUE_PENDING)) {
 		htc_batt_info.state &= ~STATE_WORKQUEUE_PENDING;
@@ -3299,7 +3934,7 @@ static void htc_battery_fb_register(struct work_struct *work)
 #if defined(CONFIG_MACH_B2_WLJ)
 static void usb_overheat_monitor(struct work_struct *work)
 {
-	
+	/* STEP: Check USB temp if overheat during charging*/
 	if (htc_batt_info.igauge->get_usb_temperature &&
 			htc_batt_info.usb_temp_monitor_enable){
 		htc_batt_info.igauge->get_usb_temperature(&htc_batt_info.rep.usb_temp);
@@ -3313,9 +3948,35 @@ static void usb_overheat_monitor(struct work_struct *work)
 }
 #endif
 
+static int reboot_consistent_command_call(struct notifier_block *nb,
+		unsigned long event, void *data)
+{
+#if 0   // Removed for misc_partition write permission
+	if ((event != SYS_RESTART) && (event != SYS_POWER_OFF))
+#endif
+		goto end;
+
+	BATT_LOG("%s: save batt cycle data", __func__);
+	/* write batt cycle data to emmc */
+	emmc_misc_write(g_total_level_raw, HTC_BATT_TOTAL_LEVELRAW);
+	emmc_misc_write(g_overheat_55_sec, HTC_BATT_OVERHEAT_MSEC);
+	emmc_misc_write(g_batt_cycle_checksum, HTC_BATT_CYCLE_CHECKSUM);
+
+	BATT_LOG("%s: save consistent data", __func__);
+	htc_batt_trigger_store_battery_data(1);
+
+end:
+	return NOTIFY_DONE;
+}
+
+
+static struct notifier_block reboot_consistent_command = {
+	.notifier_call = reboot_consistent_command_call,
+};
+
 static int htc_battery_probe(struct platform_device *pdev)
 {
-	int i, rc = 0;
+	int i, rc = 0, ret = 0;
 	struct htc_battery_platform_data *pdata = pdev->dev.platform_data;
 	struct htc_battery_core *htc_battery_core_ptr;
 
@@ -3334,6 +3995,7 @@ static int htc_battery_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&shutdown_work, shutdown_worker);
 	INIT_DELAYED_WORK(&fake_src_detect_work, fake_src_detect_worker);
 	INIT_DELAYED_WORK(&check_consistent_work, check_consistent_worker);
+/* MATT porting */
 #if 0
 	if (pdata->gpio_mbat_in_trigger_level == MBAT_IN_HIGH_TRIGGER)
 		rc = request_irq(pdata->gpio_mbat_in,
@@ -3354,6 +4016,11 @@ static int htc_battery_probe(struct platform_device *pdev)
 	htc_battery_core_ptr->func_show_cc_attr = htc_battery_show_cc_attr;
 	htc_battery_core_ptr->func_show_htc_extension_attr =
 										htc_battery_show_htc_extension_attr;
+	htc_battery_core_ptr->func_show_charger_type_attr = htc_charger_type_attr;
+	htc_battery_core_ptr->func_show_thermal_batt_temp_attr = htc_thermal_batt_temp_attr;
+	htc_battery_core_ptr->func_show_batt_bidata_attr = htc_batt_bidata_attr;
+	htc_battery_core_ptr->func_show_consist_data_attr = htc_consist_data_attr;
+	htc_battery_core_ptr->func_show_cycle_data_attr = htc_cycle_data_attr;
 	htc_battery_core_ptr->func_get_battery_info = htc_batt_get_battery_info;
 	htc_battery_core_ptr->func_charger_control = htc_batt_charger_control;
 	htc_battery_core_ptr->func_set_full_level = htc_batt_set_full_level;
@@ -3379,6 +4046,7 @@ static int htc_battery_probe(struct platform_device *pdev)
 	htc_battery_core_register(&pdev->dev, htc_battery_core_ptr);
 
 	htc_batt_info.device_id = pdev->id;
+/* MATT porting */
 #if 0
 	htc_batt_info.guage_driver = pdata->guage_driver;
 	htc_batt_info.charger = pdata->charger;
@@ -3389,7 +4057,7 @@ static int htc_battery_probe(struct platform_device *pdev)
 	for (i = 0; i < ADC_REPLY_ARRAY_SIZE; i++)
 		htc_batt_info.adc_vref[i] = 66;
 
-	
+	/* MATT add */
 	htc_batt_info.critical_low_voltage_mv = pdata->critical_low_voltage_mv;
 	if (pdata->critical_alarm_vol_ptr) {
 		htc_batt_info.critical_alarm_vol_ptr = pdata->critical_alarm_vol_ptr;
@@ -3419,6 +4087,7 @@ static int htc_battery_probe(struct platform_device *pdev)
 	htc_batt_info.icharger = &pdata->icharger;
 	}
 
+/* MATT porting */
 #if 0
 	htc_batt_info.mpp_config = &pdata->mpp_data;
 #endif
@@ -3473,13 +4142,15 @@ static int htc_battery_probe(struct platform_device *pdev)
 		goto fail;
 	}
 
+	/* FIXME: workaround 8960 cable detect status is not correct
+	 * at register_notfier call */
 	if (htc_batt_info.icharger &&
 			htc_batt_info.icharger->charger_change_notifier_register)
 		htc_batt_info.icharger->charger_change_notifier_register(
 											&cable_status_notifier);
-#if 0
+#if 0//FIXME
 
-	
+	/* check if need software safety tiemr */
 	if (htc_batt_info.icharger && (htc_batt_info.icharger->sw_safetytimer) &&
 			!(get_kernel_flag() & KERNEL_FLAG_KEEP_CHARG_ON) &&
 			!(get_kernel_flag() & KERNEL_FLAG_PA_RECHARG_TEST))
@@ -3490,7 +4161,7 @@ static int htc_battery_probe(struct platform_device *pdev)
 
 		}
 
-	
+	/* remove all limit charging if KEEP_CHARG_ON flag is on */
 	if((get_kernel_flag() & KERNEL_FLAG_KEEP_CHARG_ON) || (get_kernel_flag() & KERNEL_FLAG_PA_RECHARG_TEST))
 	{
 		chg_limit_active_mask = 0;
@@ -3517,8 +4188,17 @@ static int htc_battery_probe(struct platform_device *pdev)
 	register_early_suspend(&early_suspend);
 #endif
 
+	/*Register the reboot command to do consistent*/
+	ret = register_reboot_notifier(&reboot_consistent_command);
+	if (ret) {
+		BATT_ERR("can't register reboot notifier, error = %d\n", ret);
+		return ret;
+	}
+
+/* MATT add + */
 htc_batt_timer.time_out = BATT_TIMER_UPDATE_TIME;
 batt_set_check_timer(htc_batt_timer.time_out);
+/* MATT add - */
 
 	htc_battery_probe_flag = 1;
 fail:
@@ -3529,10 +4209,11 @@ fail:
 #ifdef CONFIG_HTC_PNPMGR
 extern int pnpmgr_battery_charging_enabled(int charging_enabled);
 extern int pnpmgr_batt_thermal_notify(int temp);
-#endif 
+#endif /* CONFIG_HTC_PNPMGR */
 static int critical_alarm_voltage_mv[] = {3000, 3200, 3400};
 
 static struct htc_battery_platform_data htc_battery_pdev_data = {
+/*8974_FIXME to remove icharger and igague before finish porting*/
 	.guage_driver = 0,
 	.chg_limit_active_mask = HTC_BATT_CHG_LIMIT_BIT_TALK |
 								HTC_BATT_CHG_LIMIT_BIT_NAVI |
@@ -3552,12 +4233,12 @@ static struct htc_battery_platform_data htc_battery_pdev_data = {
 	.force_shutdown_batt_vol = 3000,
 #if defined(CONFIG_MACH_B2_WLJ)
 	.usb_temp_monitor_enable = 1,
-	.usb_temp_overheat_increase_threshold = 25, 
-	.normal_usb_temp_threshold = 450, 
+	.usb_temp_overheat_increase_threshold = 25, /* USB temp increases 2.5 degreeC within 10sec*/
+	.normal_usb_temp_threshold = 450, /* Start to monitor USB temp only when it's over 45 degreeC*/
 	.usb_temp_overheat_threshold = 650,
 #endif
 
-	
+	/* charger */
 	.icharger.name = "pmi8994",
 	.icharger.dump_all = pmi8994_dump_all,
 	.icharger.is_ovp = pmi8994_is_charger_ovp,
@@ -3586,10 +4267,15 @@ static struct htc_battery_platform_data htc_battery_pdev_data = {
 	.icharger.complete_resume = pmi8994_complete_resume,
 	.icharger.max_input_current = pm8994_set_hsml_target_ma,
 	.icharger.set_limit_input_current = pmi8994_limit_input_current,
+	.icharger.get_usb_type = pmi8994_get_usb_type,
+	.icharger.get_vbus = pmi8994_get_vbus,
+	.icharger.get_max_iusb = pmi8994_get_max_iusb,
+	.icharger.get_AICL = pmi8994_get_AICL,
 	.icharger.is_bad_cable_used = pmi8994_is_bad_cable_used,
+	.icharger.is_quick_charger_used = pmi8994_is_quick_charger_used,
 	.icharger.set_aicl_deglitch_wa_check = pmi8994_set_aicl_deglitch_wa_check,
 
-	
+	/* gauge */
 	.igauge.name = "pmi8994",
 	.igauge.get_battery_voltage = pmi8994_get_batt_voltage,
 	.igauge.get_battery_current = pmi8994_fg_get_batt_current,
@@ -3605,8 +4291,9 @@ static struct htc_battery_platform_data htc_battery_pdev_data = {
 	.igauge.get_battery_ui_soc = pmi8994_fg_get_battery_ui_soc,
 	.igauge.store_battery_ui_soc = pmi8994_fg_store_battery_ui_soc,
 	.igauge.check_consistent = pmi8994_fg_check_consistent,
+	.igauge.get_batt_cycle = pmi8994_fg_get_batt_cycle,
 
-#if 0
+#if 0//FIXME
 
 	.icharger.get_charging_source = pm8941_get_charging_source,
 	.icharger.get_charging_enabled = pm8941_get_charging_enabled,
@@ -3640,11 +4327,11 @@ static struct htc_battery_platform_data htc_battery_pdev_data = {
 						pm8941_batt_lower_alarm_threshold_set,
 	.igauge.check_soc_for_sw_ocv = pm8941_check_soc_for_sw_ocv,
 #endif
-	
+	/* pnpmgr */
 #ifdef CONFIG_HTC_PNPMGR
 	.notify_pnpmgr_charging_enabled = pnpmgr_battery_charging_enabled,
 	.notify_pnpmgr_batt_thermal = pnpmgr_batt_thermal_notify,
-#endif 
+#endif /* CONFIG_HTC_PNPMGR */
 };
 
 static struct platform_device htc_battery_pdev = {
@@ -3697,11 +4384,13 @@ static int __init htc_battery_init(void)
 	mutex_init(&batt_set_alarm_lock);
 #endif
 
-	
+	/* cable_detect_register_notifier(&cable_status_notifier); */
 	platform_device_register(&htc_battery_pdev);
 	platform_driver_register(&htc_battery_driver);
 
-	
+	g_flag_ats_limit_chg =
+		(get_kernel_flag() & KERNEL_FLAG_ATS_LIMIT_CHARGE) ? 1 : 0;
+	/* init battery parameters. */
 	htc_batt_info.rep.batt_vol = 3700;
 	htc_batt_info.rep.batt_id = 1;
 	htc_batt_info.rep.batt_temp = 250;
@@ -3716,11 +4405,15 @@ static int __init htc_battery_init(void)
 	htc_batt_info.rep.overload = 0;
 	htc_batt_info.rep.usb_overheat = 0;
 	htc_batt_info.rep.usb_temp = 250;
+	htc_batt_info.rep.consistent = -1;
 	htc_batt_timer.total_time_ms = 0;
 	htc_batt_timer.batt_system_jiffies = jiffies;
 	htc_batt_timer.batt_alarm_status = 0;
 	htc_batt_timer.alarm_timer_flag = 0;
 
+	/* Modify full level for ATS test */
+	if (g_flag_ats_limit_chg)
+		htc_batt_info.rep.full_level_dis_batt_chg = 50;
 #ifdef CONFIG_HTC_BATT_ALARM
 	battery_vol_alarm_mode = BATT_ALARM_NORMAL_MODE;
 	screen_state = 1;

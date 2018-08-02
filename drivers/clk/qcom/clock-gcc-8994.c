@@ -3091,6 +3091,7 @@ int is_xo_src(struct clk *clk)
                 return 0;
 }
 
+/*[HTC] added for clock debugging*/
 void clk_ignore_list_add(const char *clock_name)
 {
 	struct clk_lookup *p, *cl = NULL;
@@ -3106,6 +3107,7 @@ void clk_ignore_list_add(const char *clock_name)
 	cl->clk->flags |= CLKFLAG_IGNORE;
 }
 
+/*[HTC] added for clock debugging*/
 int __init clk_ignore_list_init(void)
 {
 	clk_ignore_list_add("gcc_blsp1_uart2_apps_clk");
