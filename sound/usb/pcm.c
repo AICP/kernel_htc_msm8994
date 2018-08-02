@@ -36,6 +36,10 @@
 #include "clock.h"
 #include "power.h"
 
+// HTC_AUD_START
+#include <soc/qcom/htc_util.h>
+// HTC_AUD_END
+
 #define SUBSTREAM_FLAG_DATA_EP_STARTED	0
 #define SUBSTREAM_FLAG_SYNC_EP_STARTED	1
 
@@ -1298,6 +1302,11 @@ static void prepare_playback_urb(struct snd_usb_substream *subs,
 	urb->number_of_packets = 0;
 	spin_lock_irqsave(&subs->lock, flags);
 	for (i = 0; i < ctx->packets; i++) {
+//HTC_AUD_START
+		//if (ctx->packet_size[i])
+		//	counts = ctx->packet_size[i];
+		//else
+//HTC_AUD_END
 			counts = snd_usb_endpoint_next_packet_size(ep);
 
 		/* set up descriptor */
@@ -1441,11 +1450,21 @@ static void retire_playback_urb(struct snd_usb_substream *subs,
 
 static int snd_usb_playback_open(struct snd_pcm_substream *substream)
 {
+	// HTC_AUD_START
+	pr_info("%s htc_disable_partial_pm_log_for_audio: 1\n", __func__);
+	htc_disable_partial_pm_log_for_audio(true);
+	// HTC_AUD_END
+
 	return snd_usb_pcm_open(substream, SNDRV_PCM_STREAM_PLAYBACK);
 }
 
 static int snd_usb_playback_close(struct snd_pcm_substream *substream)
 {
+	// HTC_AUD_START
+	pr_info("%s htc_disable_partial_pm_log_for_audio: 0\n", __func__);
+	htc_disable_partial_pm_log_for_audio(false);
+	// HTC_AUD_END
+
 	return snd_usb_pcm_close(substream, SNDRV_PCM_STREAM_PLAYBACK);
 }
 

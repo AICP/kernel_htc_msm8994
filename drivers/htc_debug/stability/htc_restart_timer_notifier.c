@@ -7,6 +7,7 @@
 
 #define RESTART_TIMER_TIMEOUT 12
 
+//restart timer function
 static void restart_timeout(unsigned long data)
 {
 	pr_emerg("--------------Restart timer timeout----------------\n");
@@ -15,6 +16,7 @@ static void restart_timeout(unsigned long data)
 	show_state_filter(TASK_UNINTERRUPTIBLE);
 	BUG();
 }
+//restart notifier function
 int restart_timer_add(struct notifier_block *this,unsigned long code,void *data)
 {
 	static struct timer_list *restart_timer;
@@ -37,7 +39,7 @@ static struct notifier_block restart_notifier ={
 
 static int __init timer_notifier_add(void)
 {
-	register_reboot_notifier(&restart_notifier);
+	register_reboot_notifier(&restart_notifier);//add a notifier block in reboot notifier list
 
 	return 0;
 }

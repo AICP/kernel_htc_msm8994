@@ -41,10 +41,14 @@
 #include <sound/msm-dts-eagle.h>
 #include <sound/adsp_err.h>
 
+//htc audio ++
 #undef pr_info
 #undef pr_err
 #define pr_info(fmt, ...) pr_aud_info(fmt, ##__VA_ARGS__)
 #define pr_err(fmt, ...) pr_aud_err(fmt, ##__VA_ARGS__)
+//htc audio --
+
+#define FRAME_NUM             (8)
 
 #define TRUE        0x01
 #define FALSE       0x00
@@ -132,6 +136,7 @@ static int out_cold_index;
 static char *out_buffer;
 static char *in_buffer;
 
+//htc audio ++
 int q6asm_enable_effect(struct audio_client *ac, uint32_t module_id,
 			uint32_t param_id, uint32_t payload_size,
 			void *payload)
@@ -180,6 +185,7 @@ fail_cmd:
 		kfree(q6_cmd);
 	return rc;
 }
+//htc audio --
 
 
 static int audio_output_latency_dbgfs_open(struct inode *inode,
@@ -951,7 +957,7 @@ int q6asm_audio_client_buf_free_contiguous(unsigned int dir,
 	struct audio_port_data *port;
 	int cnt = 0;
 	int rc = 0;
-	pr_info("%s: Session id %d\n", __func__, ac->session);
+	pr_debug("%s: Session id %d\n", __func__, ac->session); //HTC_AUDIO
 	mutex_lock(&ac->cmd_lock);
 	port = &ac->port[dir];
 	if (!port->buf) {
@@ -1235,6 +1241,8 @@ int q6asm_audio_client_buf_alloc(unsigned int dir,
 			pr_debug("%s: buffer already allocated\n", __func__);
 			return 0;
 		}
+		if (bufcnt != FRAME_NUM)
+			goto fail;
 		mutex_lock(&ac->cmd_lock);
 		if (bufcnt > (U32_MAX/sizeof(struct audio_buffer))) {
 			pr_err("%s: Buffer size overflows", __func__);
@@ -1311,7 +1319,7 @@ int q6asm_audio_client_buf_alloc_contiguous(unsigned int dir,
 		return -EINVAL;
 	}
 
-	pr_info("%s: session[%d]bufsz[%d]bufcnt[%d]\n",
+	pr_debug("%s: session[%d]bufsz[%d]bufcnt[%d]\n", //HTC_AUDIO
 			__func__, ac->session,
 			bufsz, bufcnt);
 
@@ -2418,16 +2426,12 @@ static int __q6asm_open_write(struct audio_client *ac, uint32_t format,
 	     (open.postprocopo_id == ASM_STREAM_POSTPROC_TOPO_ID_HPX_PLUS)))
 		open.postprocopo_id = ASM_STREAM_POSTPROCOPO_ID_NONE;
 
+//htc audio ++
 	if ((ac->io_mode & COMPRESSED_IO) || (ac->io_mode & COMPRESSED_STREAM_IO)) {
 		open.postprocopo_id = HTC_POPP_TOPOLOGY;
 	}
 
 	pr_info("%s: session %d topology 0x%x\n",__func__,ac->session,open.postprocopo_id);
-
-	/* For DTS EAGLE only, force 24 bit */
-	if ((open.postprocopo_id == ASM_STREAM_POSTPROC_TOPO_ID_DTS_HPX) ||
-	     (open.postprocopo_id == ASM_STREAM_POSTPROC_TOPO_ID_HPX_PLUS))
-		open.bits_per_sample = 24;
 
 	/* For DTS EAGLE only, force 24 bit */
 	if ((open.postprocopo_id == ASM_STREAM_POSTPROC_TOPO_ID_DTS_HPX) ||
@@ -2781,49 +2785,32 @@ int q6asm_set_shared_circ_buff(struct audio_client *ac,
 			       int dir)
 {
 	struct audio_buffer *buf_circ;
-	int bytes_to_alloc, rc;
-	size_t len;
-
-	mutex_lock(&ac->cmd_lock);
-
-	if (ac->port[dir].buf) {
-		pr_err("%s: Buffer already allocated\n", __func__);
-		rc = -EINVAL;
-		mutex_unlock(&ac->cmd_lock);
-		goto done;
-	}
-
+	int bytes_to_alloc, rc, len;
 	buf_circ = kzalloc(sizeof(struct audio_buffer), GFP_KERNEL);
-
 	if (!buf_circ) {
 		rc = -ENOMEM;
 		goto done;
 	}
-
+	mutex_lock(&ac->cmd_lock);
+	ac->port[dir].buf = buf_circ;
 	bytes_to_alloc = bufsz * bufcnt;
 	bytes_to_alloc = PAGE_ALIGN(bytes_to_alloc);
-
 	rc = msm_audio_ion_alloc("audio_client", &buf_circ->client,
 			&buf_circ->handle, bytes_to_alloc,
 			(ion_phys_addr_t *)&buf_circ->phys,
-			&len, &buf_circ->data);
-
+			(size_t *)&len, &buf_circ->data);
 	if (rc) {
 		pr_err("%s: Audio ION alloc is failed, rc = %d\n", __func__,
 				rc);
-		kfree(buf_circ);
 		mutex_unlock(&ac->cmd_lock);
+		kfree(buf_circ);
 		goto done;
 	}
-
-	ac->port[dir].buf = buf_circ;
 	buf_circ->used = dir ^ 1;
 	buf_circ->size = bytes_to_alloc;
 	buf_circ->actual_size = bytes_to_alloc;
 	memset(buf_circ->data, 0, buf_circ->actual_size);
-
 	ac->port[dir].max_buf_cnt = 1;
-
 	open->shared_circ_buf_mem_pool_id = ADSP_MEMORY_MAP_SHMEM8_4K_POOL;
 	open->shared_circ_buf_num_regions = 1;
 	open->shared_circ_buf_property_flag = 0x00;
@@ -2832,16 +2819,13 @@ int q6asm_set_shared_circ_buff(struct audio_client *ac,
 	open->shared_circ_buf_start_phy_addr_msw =
 			upper_32_bits(buf_circ->phys);
 	open->shared_circ_buf_size = bufsz * bufcnt;
-
 	open->map_region_circ_buf.shm_addr_lsw = lower_32_bits(buf_circ->phys);
 	open->map_region_circ_buf.shm_addr_msw = upper_32_bits(buf_circ->phys);
 	open->map_region_circ_buf.mem_size_bytes = bytes_to_alloc;
-
 	mutex_unlock(&ac->cmd_lock);
 done:
 	return rc;
 }
-
 
 static
 int q6asm_set_shared_pos_buff(struct audio_client *ac,
@@ -2970,6 +2954,12 @@ int q6asm_open_shared_io(struct audio_client *ac,
 		open->fmt_id = ASM_MEDIA_FMT_MULTI_CHANNEL_PCM_V3;
 	else {
 		pr_err("%s: Invalid format[%d]\n", __func__, config->format);
+		rc = -EINVAL;
+		goto done;
+	}
+
+	if (ac->port[dir].buf) {
+		pr_err("%s: Buffer already allocated\n", __func__);
 		rc = -EINVAL;
 		goto done;
 	}
@@ -3211,9 +3201,9 @@ static int __q6asm_run_nowait(struct audio_client *ac, uint32_t flags,
 		pr_err("%s: AC APR handle NULL\n", __func__);
 		return -EINVAL;
 	}
-	pr_debug("%s: session[%d]\n", __func__, ac->session);
+	pr_debug("%s: session[%d] stream %d\n", __func__, ac->session, stream_id); // HTC_AUD_MOD
 	q6asm_stream_add_hdr_async(ac, &run.hdr, sizeof(run), TRUE, stream_id);
-	atomic_set(&ac->cmd_state, 1);
+	//atomic_set(&ac->cmd_state, 1);//HTC_AUD for racecondition with CMD_FLUSH
 	run.hdr.opcode = ASM_SESSION_CMD_RUN_V2;
 	run.flags    = flags;
 	run.time_lsw = lsw_ts;
@@ -6483,7 +6473,7 @@ static int __q6asm_cmd(struct audio_client *ac, int cmd, uint32_t stream_id)
 		state = &ac->cmd_state;
 		break;
 	case CMD_OUT_FLUSH:
-		pr_debug("%s: CMD_OUT_FLUSH\n", __func__);
+		pr_info("%s: CMD_OUT_FLUSH\n", __func__); //HTC_AUDIO
 		hdr.opcode = ASM_STREAM_CMD_FLUSH_READBUFS;
 		state = &ac->cmd_state;
 		break;
@@ -6582,7 +6572,7 @@ static int __q6asm_cmd_nowait(struct audio_client *ac, int cmd,
 		return -EINVAL;
 	}
 	q6asm_stream_add_hdr_async(ac, &hdr, sizeof(hdr), TRUE, stream_id);
-	atomic_set(&ac->cmd_state, 1);
+	//atomic_set(&ac->cmd_state, 1);//HTC_AUD for racecondition with CMD_FLUSH
 	/*
 	 * Updated the token field with stream/session for compressed playback
 	 * Platform driver must know the the stream with which the command is
@@ -6596,15 +6586,15 @@ static int __q6asm_cmd_nowait(struct audio_client *ac, int cmd,
 			__func__, hdr.token, stream_id, ac->session);
 	switch (cmd) {
 	case CMD_PAUSE:
-		pr_debug("%s: CMD_PAUSE\n", __func__);
+		pr_info("%s: CMD_PAUSE\n", __func__); //HTC_AUDIO
 		hdr.opcode = ASM_SESSION_CMD_PAUSE;
 		break;
 	case CMD_EOS:
-		pr_debug("%s: CMD_EOS\n", __func__);
+		pr_info("%s: CMD_EOS\n", __func__); //HTC_AUDIO
 		hdr.opcode = ASM_DATA_CMD_EOS;
 		break;
 	case CMD_CLOSE:
-		pr_debug("%s: CMD_CLOSE\n", __func__);
+		pr_info("%s: CMD_CLOSE\n", __func__); //HTC_AUDIO
 		hdr.opcode = ASM_STREAM_CMD_CLOSE;
 		break;
 	default:
@@ -6717,6 +6707,7 @@ int q6asm_send_meta_data(struct audio_client *ac, uint32_t initial_samples,
 				     trailing_samples);
 }
 
+// htc audio++
 int q6asm_stream_sample_rate_to_htc_misc_effect(struct audio_client *ac, uint32_t stream_id,
 		uint32_t module_id, uint32_t param_id, uint32_t sample_rate)
 {
@@ -6765,6 +6756,7 @@ fail_cmd:
 		kfree(q6_cmd);
 	return rc;
 }
+// htc audio--
 
 static void q6asm_reset_buf_state(struct audio_client *ac)
 {

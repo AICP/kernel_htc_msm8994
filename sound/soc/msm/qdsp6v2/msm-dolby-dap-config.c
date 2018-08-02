@@ -22,9 +22,12 @@
 #define DOLBY_PARAM_VCNB_MAX_LENGTH 40
 #endif
 
+// htc audio ++
 #define DS1_MODULE_ID                   0x00010775
 
+/* ramp up/down for 30ms    */
 #define DOLBY_SOFT_VOLUME_PERIOD	40
+/* Step value 0ms or 0us */
 #define DOLBY_SOFT_VOLUME_STEP		100
 #define DOLBY_ADDITIONAL_RAMP_WAIT	20
 #define SOFT_VOLUME_PARAM_SIZE		3
@@ -38,13 +41,16 @@ enum {
 
 #define VOLUME_ZERO_GAIN     0x0
 #define VOLUME_UNITY_GAIN    0x2000
+/* Wait time for module enable/disble */
 #define DOLBY_MODULE_ENABLE_PERIOD     50
 
 enum {
 	MODULE_DISABLE = 0,
 	MODULE_ENABLE,
 };
+// htc audio --
 
+/* dolby endp based parameters */
 struct dolby_dap_endp_params_s {
 	int device;
 	int device_ch_caps;
@@ -71,7 +77,7 @@ const struct dolby_dap_endp_params_s
 		 DOLBY_ENDDEP_PARAM_VMB_LENGTH},
 		{DOLBY_ENDDEP_PARAM_DVLO_OFFSET, DOLBY_ENDDEP_PARAM_DVLI_OFFSET,
 		 DOLBY_ENDDEP_PARAM_VMB_OFFSET},
-		{-320, -320, 64} 
+		{-320, -320, 64} // htc audio
 	},
 	{WIRED_HEADSET,	2, DOLBY_ENDP_HEADPHONES,
 		{DOLBY_PARAM_ID_DVLO, DOLBY_PARAM_ID_DVLI, DOLBY_PARAM_ID_VMB},
@@ -334,13 +340,13 @@ struct dolby_dap_params_states_s {
 	bool use_cache;
 	bool auto_endp;
 	bool enddep_params;
-	int  dap_bypass; 
+	int  dap_bypass; // htc audio
 	int  port_id[AFE_MAX_PORTS];
 	int  copp_idx[AFE_MAX_PORTS];
-	
+	// HTC_AUDIO_START
 	int  port_open_count[AFE_MAX_PORTS];
-	int  port_bypass_state[AFE_MAX_PORTS]; 
-	
+	int  port_bypass_state[AFE_MAX_PORTS]; // -1=not init, 0=Dolby not bypass, 1=Dolby bypass
+	// HTC_AUDIO_END
 	int  port_ids_dolby_can_be_enabled;
 	int  device;
 };
@@ -348,14 +354,19 @@ struct dolby_dap_params_states_s {
 static struct dolby_dap_params_get_s dolby_dap_params_get = {-1, DEVICE_OUT_ALL,
 							     0, 0, 0};
 static struct dolby_dap_params_states_s dolby_dap_params_states = { true, true,
-						
+						// htc audio ++
 						true, 1, {DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID, DOLBY_INVALID_PORT_ID},
 						{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
 						{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 						{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
 						DEVICE_OUT_ALL, 0 };
-						
+						// htc audio --
+/*
+port_ids_dolby_can_be_enabled is set to 0x7FFFFFFF.
+this needs to be removed after interface validation
+*/
 
+// htc audio ++
 static void msm_dolby_dap_check_and_update_ramp_wait(int port_id, int copp_idx,
 						   int *ramp_wait)
 {
@@ -383,6 +394,11 @@ static void msm_dolby_dap_check_and_update_ramp_wait(int port_id, int copp_idx,
 	}
 end:
 	kfree(update_params_value);
+	/*
+	 * No error returned as we do not need to error out from dap on/dap
+	 * bypass. The default ramp parameter will be used to wait during
+	 * ramp down.
+	 */
 	return;
 }
 
@@ -391,11 +407,11 @@ static int msm_dolby_dap_handle_bypass_wait(int port_id, int copp_idx,
 {
         int ret = 0;
         adm_set_wait_parameters(port_id, copp_idx);
-	
-        
+	// htc audio: do we really need this unlock/lock?
+        //msm_pcm_routing_release_lock();
         ret = adm_wait_timeout(port_id, copp_idx, wait_time);
-        
-        
+        //msm_pcm_routing_acquire_lock();
+        /* Reset the parameters if wait has timed out */
         if (ret == 0)
                 adm_reset_wait_parameters(port_id, copp_idx);
         return ret;
@@ -448,16 +464,25 @@ static int msm_dolby_dap_handle_hard_bypass(const int port_id, const int copp_id
 				__func__, rc);
 			goto end;
 		}
+		/*
+		 * get ramp parameters
+		 * check for change in ramp parameters
+		 * update ramp wait
+		 */
 		if (wait) {
 			msm_dolby_dap_check_and_update_ramp_wait(port_id,
 						       copp_idx,
 						       &ramp_wait);
 		}
 
-		
+		/* Mute before switching modules */
 		rc = adm_set_volume(port_id, copp_idx,
 				    VOLUME_ZERO_GAIN);
 		if (rc < 0) {
+			/*
+			 * Not Fatal can continue bypass operations.
+			 * Do not need to block playback
+			 */
 			pr_info("%s :Set volume port_id %d",
 				__func__, port_id);
 			pr_info("copp_idx %d, error %d\n",
@@ -486,17 +511,21 @@ static int msm_dolby_dap_handle_hard_bypass(const int port_id, const int copp_id
 		if (rc == -EINTR) {
 			pr_info("%s:bypass interupted port_id %d copp_idx %d\n",
 				__func__, port_id, copp_idx);
-			
+			/* Interrupted ignore bypass */
 			rc = 0;
 			goto end;
 		}
 	}
 
 	if (ramp) {
-		
+		/* set volume to unity gain after module on/off */
 		rc = adm_set_volume(port_id, copp_idx,
 				    VOLUME_UNITY_GAIN);
 		if (rc < 0) {
+			/*
+			 * Not Fatal can continue bypass operations.
+			 * Do not need to block playback
+			 */
 			pr_info("%s: Set vol port %d copp %d, rc %d\n",
 				__func__, port_id, copp_idx, rc);
 			rc = 0;
@@ -508,18 +537,21 @@ end:
 }
 
 
+// htc audio --
 
+//HTC_AUD_START
 void msm_dolby_ssr_reset(void)
 {
 	int i;
 
 	pr_err("%s: reset dolby dap params states", __func__);
 
-	
+	//check if we need to reset more
 	for (i = 0; i < AFE_MAX_PORTS; i++) {
 		dolby_dap_params_states.port_open_count[i] = 0;
 	}
 }
+//HTC_AUD_END
 
 static int msm_dolby_dap_map_device_to_dolby_endpoint(int device)
 {
@@ -697,7 +729,7 @@ int msm_dolby_dap_init(int port_id, int copp_idx, int channels,
 	if ((port_id != DOLBY_INVALID_PORT_ID)) {
 		dolby_dap_params_states.port_id[index] = port_id;
 		dolby_dap_params_states.copp_idx[index] = copp_idx;
-		
+		// HTC_AUD_START
 		dolby_dap_params_states.port_open_count[index]++;
 		pr_debug("%s: port idx %d port_id %#x, open_count %d\n", __func__,
 			index, port_id, dolby_dap_params_states.port_open_count[index]);
@@ -706,7 +738,7 @@ int msm_dolby_dap_init(int port_id, int copp_idx, int channels,
 		}
 		dolby_dap_params_states.port_bypass_state[index] = -1;
 		msm_dolby_dap_handle_hard_bypass(port_id, copp_idx, false, false);
-		
+		// HTC_AUD_END
 
 		if (dolby_dap_params_states.auto_endp) {
 			ret = msm_dolby_dap_send_end_point(port_id, copp_idx);
@@ -743,22 +775,28 @@ int msm_dolby_dap_init(int port_id, int copp_idx, int channels,
 void msm_dolby_dap_deinit(int port_id)
 {
 	int index = adm_validate_and_get_port_index(port_id);
+//HTC_AUD_START
 	if (index < 0 || (afe_get_port_type(port_id) != MSM_AFE_PORT_TYPE_RX) || !(port_id & dolby_dap_params_states.port_ids_dolby_can_be_enabled)) {
+//HTC_AUD_END
 		pr_err("%s: Invalid port idx %d port_id %#x\n", __func__, index,
 			port_id);
 		return;
 	}
 
+//HTC_AUD_START
 	if (dolby_dap_params_states.port_open_count[index] > 0)
 		dolby_dap_params_states.port_open_count[index]--;
 	if ((dolby_dap_params_states.port_id[index] == port_id &&
 		dolby_dap_params_states.port_open_count[index] == 0)) {
+//HTC_AUD_END
 		dolby_dap_params_states.port_id[index] = DOLBY_INVALID_PORT_ID;
 		dolby_dap_params_states.copp_idx[index] = -1;
-		dolby_dap_params_states.port_bypass_state[index] = -1;  
+		dolby_dap_params_states.port_bypass_state[index] = -1;  // htc audio
 	}
+//HTC_AUD_START
 	pr_debug("%s: port idx %d port_id %#x, open_count %d\n", __func__,
 		index, port_id, dolby_dap_params_states.port_open_count[index]);
+//HTC_AUD_END
 }
 
 static int msm_dolby_dap_set_vspe_vdhe(int port_id, int copp_idx,
@@ -911,7 +949,7 @@ int msm_dolby_dap_param_to_set_control_put(struct snd_kcontrol *kcontrol,
 				port_id = dolby_dap_params_states.port_id[idx];
 				copp_idx =
 					dolby_dap_params_states.copp_idx[idx];
-				if ((copp_idx >= 0) && 
+				if ((copp_idx >= 0) && // htc audio
 				    (copp_idx < MAX_COPPS_PER_PORT) &&
 				    (port_id != DOLBY_INVALID_PORT_ID))
 					rc |= msm_dolby_dap_send_cached_params(
@@ -923,14 +961,14 @@ int msm_dolby_dap_param_to_set_control_put(struct snd_kcontrol *kcontrol,
 		break;
 		case DOLBY_COMMIT_IDX: {
 			pr_debug("%s: COMMIT recvd\n", __func__);
-			
+			/* COMMIT: Send only modified paramters to DSP */
 			for (idx = 0; idx < AFE_MAX_PORTS; idx++) {
 				port_id = dolby_dap_params_states.port_id[idx];
 				copp_idx =
 					dolby_dap_params_states.copp_idx[idx];
-				if ((copp_idx >= 0) && 
+				if ((copp_idx >= 0) && // htc audio
 				    (copp_idx < MAX_COPPS_PER_PORT) &&
-				    (port_id != DOLBY_INVALID_PORT_ID)) 
+				    (port_id != DOLBY_INVALID_PORT_ID)) // htc audio
 					rc |= msm_dolby_dap_send_cached_params(
 								      port_id,
 								      copp_idx,
@@ -1137,13 +1175,13 @@ int msm_dolby_dap_param_visualizer_control_get(struct snd_kcontrol *kcontrol,
 			break;
 	}
 	if (idx == AFE_MAX_PORTS) {
-		
+		// htc audio ++
 		pr_debug("%s, port_id not set, returning zero data\n", __func__);
 		ucontrol->value.integer.value[0] = 2*length;
 		for (i = 0; i < 2*length; i++) {
 			ucontrol->value.integer.value[1+i] = -192;
 		}
-		
+		// htc audio --
 		return 0;
 	}
 	visualizer_data = kzalloc(params_length, GFP_KERNEL);
@@ -1189,10 +1227,11 @@ int msm_dolby_dap_param_visualizer_control_get(struct snd_kcontrol *kcontrol,
 int msm_dolby_dap_param_visualizer_control_put(struct snd_kcontrol *kcontrol,
 					   struct snd_ctl_elem_value *ucontrol)
 {
-	
+	/* not used while getting the visualizer data */
 	return 0;
 }
 
+// htc audio ++
 int msm_dolby_dap_set_bypass_control_get(struct snd_kcontrol *kcontrol,
 				       struct snd_ctl_elem_value *ucontrol)
 {
@@ -1222,6 +1261,7 @@ int msm_dolby_dap_set_bypass_control_put(struct snd_kcontrol *kcontrol,
 	pr_debug("%s bypass %d\n", __func__, bypass);
 	return 0;
 }
+// htc audio --
 
 int msm_dolby_dap_endpoint_control_get(struct snd_kcontrol *kcontrol,
 				       struct snd_ctl_elem_value *ucontrol)
@@ -1298,11 +1338,13 @@ static const struct snd_kcontrol_new dolby_dap_param_visualizer_controls[] = {
 	msm_dolby_dap_param_visualizer_control_put),
 };
 
+// htc audio ++
 static const struct snd_kcontrol_new dolby_dap_set_bypass_controls[] = {
 	SOC_SINGLE_MULTI_EXT("DS1 Set Bypass", SND_SOC_NOPM, 0,
 	0xFFFFFFFF, 0, 1, msm_dolby_dap_set_bypass_control_get,
 	msm_dolby_dap_set_bypass_control_put),
 };
+// htc audio --
 
 static const struct snd_kcontrol_new dolby_dap_param_end_point_controls[] = {
 	SOC_SINGLE_MULTI_EXT("DS1 DAP Endpoint", SND_SOC_NOPM, 0,
@@ -1332,9 +1374,11 @@ void msm_dolby_dap_add_controls(struct snd_soc_platform *platform)
 				dolby_dap_param_visualizer_controls,
 			ARRAY_SIZE(dolby_dap_param_visualizer_controls));
 
+// htc audio ++
 	snd_soc_add_platform_controls(platform,
 				dolby_dap_set_bypass_controls,
 			ARRAY_SIZE(dolby_dap_set_bypass_controls));
+// htc audio --
 
 	snd_soc_add_platform_controls(platform,
 				dolby_dap_param_end_point_controls,

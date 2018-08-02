@@ -42,19 +42,29 @@
 #ifdef CONFIG_DTS
 #include<linux/regulator/consumer.h>
 #include<linux/of_gpio.h>
-#endif 
+#endif /* CONFIG_DTS */
 
 #if !defined(CONFIG_WIFI_CONTROL_FUNC)
+#define WLAN_PLAT_NODFS_FLAG    0x01
 struct wifi_platform_data {
 	int (*set_power)(int val);
 	int (*set_reset)(int val);
 	int (*set_carddetect)(int val);
 	void *(*mem_prealloc)(int section, unsigned long size);
 	int (*get_mac_addr)(unsigned char *buf);
+#if defined(CUSTOMER_HW_ONE)
+	int (*get_wake_irq)(void);
+#endif /* CUSTOMER_HW_ONE */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 58)) || defined(CUSTOM_COUNTRY_CODE)
+	void *(*get_country_code)(char *ccode, u32 flags);
+#else /* (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 58)) || defined (CUSTOM_COUNTRY_CODE) */
 	void *(*get_country_code)(char *ccode);
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 58)) */
+#if defined(CUSTOMER_HW_ONE)
 	int (*get_irq_number)(unsigned long *flags_ptr);
+#endif /* CUSTOMER_HW_ONE */
 };
-#endif 
+#endif /* CONFIG_WIFI_CONTROL_FUNC */
 
 #define WIFI_PLAT_NAME		"bcmdhd_wlan"
 #define WIFI_PLAT_NAME2		"bcm4329_wlan"
@@ -62,7 +72,7 @@ struct wifi_platform_data {
 
 #ifdef CONFIG_DTS
 struct regulator *wifi_regulator = NULL;
-#endif 
+#endif /* CONFIG_DTS */
 
 bool cfg_multichip = FALSE;
 bcmdhd_wifi_platdata_t *dhd_wifi_platdata = NULL;
@@ -77,8 +87,8 @@ extern struct wifi_platform_data dhd_wlan_control;
 static bool dts_enabled = FALSE;
 struct resource dhd_wlan_resources = {0};
 struct wifi_platform_data dhd_wlan_control = {0};
-#endif 
-#endif 
+#endif /* CONFIG_OF && !defined(CONFIG_ARCH_MSM) */
+#endif /* !defind(CONFIG_DTS) */
 
 static int dhd_wifi_platform_load(void);
 
@@ -87,8 +97,8 @@ extern void* wl_cfg80211_get_dhdp(void);
 #ifdef ENABLE_4335BT_WAR
 extern int bcm_bt_lock(int cookie);
 extern void bcm_bt_unlock(int cookie);
-static int lock_cookie_wifi = 'W' | 'i'<<8 | 'F'<<16 | 'i'<<24;	
-#endif 
+static int lock_cookie_wifi = 'W' | 'i'<<8 | 'F'<<16 | 'i'<<24;	/* cookie is "WiFi" */
+#endif /* ENABLE_4335BT_WAR */
 
 wifi_adapter_info_t* dhd_wifi_platform_get_adapter(uint32 bus_type, uint32 bus_num, uint32 slot_num)
 {
@@ -159,7 +169,7 @@ int wifi_platform_get_irq_number(wifi_adapter_info_t *adapter, unsigned long *ir
 		}
 	}
 	DHD_ERROR(("%s: failed to get irq via callback, fallback\n", __FUNCTION__));
-#endif 
+#endif /* CUSTOMER_HW_ONE */
 	if (adapter == NULL)
 		return -1;
 	if (irq_flags_ptr)
@@ -198,10 +208,10 @@ int wifi_platform_set_power(wifi_adapter_info_t *adapter, bool on, unsigned long
 			DHD_ERROR(("%s: btlock acquired\n", __FUNCTION__));
 		}
 		else {
-			
+			/* For a exceptional case, release btlock */
 			bcm_bt_unlock(lock_cookie_wifi);
 		}
-#endif 
+#endif /* ENABLE_4335BT_WAR */
 
 		err = plat_data->set_power(on);
 	}
@@ -214,7 +224,7 @@ int wifi_platform_set_power(wifi_adapter_info_t *adapter, bool on, unsigned long
 	else
 		is_power_on = FALSE;
 
-#endif 
+#endif /* CONFIG_DTS */
 
 	return err;
 }
@@ -250,9 +260,13 @@ int wifi_platform_get_mac_addr(wifi_adapter_info_t *adapter, unsigned char *buf)
 	return -EOPNOTSUPP;
 }
 
+#ifdef CUSTOM_COUNTRY_CODE
+void *wifi_platform_get_country_code(wifi_adapter_info_t *adapter, char *ccode, u32 flags)
+#else
 void *wifi_platform_get_country_code(wifi_adapter_info_t *adapter, char *ccode)
+#endif /* CUSTOM_COUNTRY_CODE */
 {
-	
+	/* get_country_code was added after 2.6.39 */
 #if	(LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 39))
 	struct wifi_platform_data *plat_data;
 
@@ -262,9 +276,17 @@ void *wifi_platform_get_country_code(wifi_adapter_info_t *adapter, char *ccode)
 
 	DHD_TRACE(("%s\n", __FUNCTION__));
 	if (plat_data->get_country_code) {
+#if     (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 58))
+		return plat_data->get_country_code(ccode, WLAN_PLAT_NODFS_FLAG);
+#else
+#ifdef CUSTOM_COUNTRY_CODE
+		return plat_data->get_country_code(ccode, flags);
+#else
 		return plat_data->get_country_code(ccode);
+#endif /* CUSTOM_COUNTRY_CODE */
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 58)) */
 	}
-#endif 
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 39)) */
 
 	return NULL;
 }
@@ -275,8 +297,11 @@ static int wifi_plat_dev_drv_probe(struct platform_device *pdev)
 	wifi_adapter_info_t *adapter;
 #ifdef CONFIG_DTS
 	int irq, gpio;
-#endif 
+#endif /* CONFIG_DTS */
 
+	/* Android style wifi platform data device ("bcmdhd_wlan" or "bcm4329_wlan")
+	 * is kept for backward compatibility and supports only 1 adapter
+	 */
 	ASSERT(dhd_wifi_platdata != NULL);
 	ASSERT(dhd_wifi_platdata->num_adapters == 1);
 	adapter = &dhd_wifi_platdata->adapters[0];
@@ -297,7 +322,7 @@ static int wifi_plat_dev_drv_probe(struct platform_device *pdev)
 		return -1;
 	}
 
-	
+	/* This is to get the irq for the OOB */
 	gpio = of_get_gpio(pdev->dev.of_node, 0);
 
 	if (gpio < 0) {
@@ -311,10 +336,10 @@ static int wifi_plat_dev_drv_probe(struct platform_device *pdev)
 	}
 	adapter->irq_num = irq;
 
-	
+	/* need to change the flags according to our requirement */
 	adapter->intr_flags = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHLEVEL |
 		IORESOURCE_IRQ_SHAREABLE;
-#endif 
+#endif /* CONFIG_DTS */
 
 	wifi_plat_dev_probe_ret = dhd_wifi_platform_load();
 	return wifi_plat_dev_probe_ret;
@@ -324,6 +349,9 @@ static int wifi_plat_dev_drv_remove(struct platform_device *pdev)
 {
 	wifi_adapter_info_t *adapter;
 
+	/* Android style wifi platform data device ("bcmdhd_wlan" or "bcm4329_wlan")
+	 * is kept for backward compatibility and supports only 1 adapter
+	 */
 	ASSERT(dhd_wifi_platdata != NULL);
 	ASSERT(dhd_wifi_platdata->num_adapters == 1);
 	adapter = &dhd_wifi_platdata->adapters[0];
@@ -334,12 +362,12 @@ static int wifi_plat_dev_drv_remove(struct platform_device *pdev)
 #else
 		wifi_platform_set_power(adapter, FALSE, WIFI_TURNOFF_DELAY);
 		wifi_platform_bus_enumerate(adapter, FALSE);
-#endif 
+#endif /* BCMPCIE */
 	}
 
 #ifdef CONFIG_DTS
 	regulator_put(wifi_regulator);
-#endif 
+#endif /* CONFIG_DTS */
 	return 0;
 }
 
@@ -349,7 +377,7 @@ static int wifi_plat_dev_drv_suspend(struct platform_device *pdev, pm_message_t 
 #if (LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 39)) && defined(OOB_INTR_ONLY) && \
 	defined(BCMSDIO)
 	bcmsdh_oob_intr_set(0);
-#endif 
+#endif /* (OOB_INTR_ONLY) */
 	return 0;
 }
 
@@ -360,7 +388,7 @@ static int wifi_plat_dev_drv_resume(struct platform_device *pdev)
 	defined(BCMSDIO)
 	if (dhd_os_check_if_up(wl_cfg80211_get_dhdp()))
 		bcmsdh_oob_intr_set(1);
-#endif 
+#endif /* (OOB_INTR_ONLY) */
 	return 0;
 }
 
@@ -369,7 +397,7 @@ static const struct of_device_id wifi_device_dt_match[] = {
 	{ .compatible = "android,bcmdhd_wlan", },
 	{},
 };
-#endif 
+#endif /* CONFIG_DTS */
 static struct platform_driver wifi_platform_dev_driver = {
 	.probe          = wifi_plat_dev_drv_probe,
 	.remove         = wifi_plat_dev_drv_remove,
@@ -379,7 +407,7 @@ static struct platform_driver wifi_platform_dev_driver = {
 	.name   = WIFI_PLAT_NAME,
 #ifdef CONFIG_DTS
 	.of_match_table = wifi_device_dt_match,
-#endif 
+#endif /* CONFIG_DTS */
 	}
 };
 
@@ -422,8 +450,11 @@ static int wifi_ctrlfunc_register_drv(void)
 			return -ENXIO;
 		}
 	}
-#endif 
+#endif /* !defined(CONFIG_DTS) */
 
+	/* multi-chip support not enabled, build one adapter information for
+	 * DHD (either SDIO, USB or PCIe)
+	 */
 	adapter = kzalloc(sizeof(wifi_adapter_info_t), GFP_KERNEL);
 	adapter->name = "DHD generic adapter";
 	adapter->bus_type = -1;
@@ -462,14 +493,14 @@ static int wifi_ctrlfunc_register_drv(void)
 		adapter->intr_flags = resource->flags & IRQF_TRIGGER_MASK;
 		wifi_plat_dev_probe_ret = dhd_wifi_platform_load();
 	}
-#endif 
+#endif /* !defined(CONFIG_DTS) */
 
 
 #ifdef CONFIG_DTS
 	wifi_plat_dev_probe_ret = platform_driver_register(&wifi_platform_dev_driver);
-#endif 
+#endif /* CONFIG_DTS */
 
-	
+	/* return probe function's return value if registeration succeeded */
 	return wifi_plat_dev_probe_ret;
 }
 
@@ -500,7 +531,7 @@ void wifi_ctrlfunc_unregister_drv(void)
 			wifi_platform_bus_enumerate(adapter, FALSE);
 		}
 	}
-#endif 
+#endif /* !defined(CONFIG_DTS) */
 
 	kfree(dhd_wifi_platdata->adapters);
 	dhd_wifi_platdata->adapters = NULL;
@@ -522,7 +553,7 @@ static int bcmdhd_wifi_plat_dev_drv_remove(struct platform_device *pdev)
 	wifi_adapter_info_t *adapter;
 	ASSERT(dhd_wifi_platdata != NULL);
 
-	
+	/* power down all adapters */
 	for (i = 0; i < dhd_wifi_platdata->num_adapters; i++) {
 		adapter = &dhd_wifi_platdata->adapters[i];
 		wifi_platform_set_power(adapter, FALSE, WIFI_TURNOFF_DELAY);
@@ -544,6 +575,13 @@ int dhd_wifi_platform_register_drv(void)
 	int err = 0;
 	struct device *dev;
 
+	/* register Broadcom wifi platform data driver if multi-chip is enabled,
+	 * otherwise use Android style wifi platform data (aka wifi control function)
+	 * if it exists
+	 *
+	 * to support multi-chip DHD, Broadcom wifi platform data device must
+	 * be added in kernel early boot (e.g. board config file).
+	 */
 	if (cfg_multichip) {
 		dev = bus_find_device(&platform_bus_type, NULL, WIFI_PLAT_EXT, wifi_platdev_match);
 		if (dev == NULL) {
@@ -554,13 +592,13 @@ int dhd_wifi_platform_register_drv(void)
 	} else {
 		err = wifi_ctrlfunc_register_drv();
 
-		
+		/* no wifi ctrl func either, load bus directly and ignore this error */
 		if (err) {
 			if (err == -ENXIO) {
-				
+				/* wifi ctrl function does not exist */
 				err = dhd_wifi_platform_load();
 			} else {
-				
+				/* unregister driver due to initialization failure */
 				wifi_ctrlfunc_unregister_drv();
 			}
 		}
@@ -590,7 +628,7 @@ static int dhd_wifi_platform_load_pcie(void)
 #if !defined(CUSTOMER_HW_ONE)
 		if (dhd_download_fw_on_driverload) {
 #endif
-			
+			/* power up all adapters */
 			for (i = 0; i < dhd_wifi_platdata->num_adapters; i++) {
 				bool chip_up = FALSE;
 				int retry = POWERUP_MAX_RETRY;
@@ -619,7 +657,7 @@ static int dhd_wifi_platform_load_pcie(void)
 						DHD_ERROR(("failed to power up %s,"
 							" %d retry left\n",
 							adapter->name, retry));
-						
+						/* WL_REG_ON state unknown, Power off forcely */
 						wifi_platform_set_power(adapter,
 							FALSE, WIFI_TURNOFF_DELAY);
 						continue;
@@ -653,7 +691,7 @@ static int dhd_wifi_platform_load_pcie(void)
 				}
 			}
 #if !defined(CUSTOMER_HW_ONE)
-		} 
+		} /* dhd_download_fw_on_driverload */
 #endif
 
 		err = dhd_bus_register();
@@ -663,6 +701,11 @@ static int dhd_wifi_platform_load_pcie(void)
 			goto fail;
 		}
 
+		/*
+		 * Wait till pci_register_driver callback called and made driver attach.
+		 * It's needed to make sync up exit from dhd insmod  and
+		 * Kernel PCIE device callback registration
+		 */
 		err = down_timeout(&dhd_registration_sem,
 			msecs_to_jiffies(DHD_REGISTRATION_TIMEOUT));
 		if (err) {
@@ -677,7 +720,7 @@ fail:
 #if !defined(CUSTOMER_HW_ONE)
 			if (dhd_download_fw_on_driverload) {
 #endif
-				
+				/* power down all adapters */
 				for (i = 0; i < dhd_wifi_platdata->num_adapters; i++) {
 					adapter = &dhd_wifi_platdata->adapters[i];
 					wifi_platform_bus_enumerate(adapter, FALSE);
@@ -685,7 +728,7 @@ fail:
 						FALSE, WIFI_TURNOFF_DELAY);
 				}
 #if !defined(CUSTOMER_HW_ONE)
-			} 
+			} /* dhd_download_fw_on_driverload */
 #endif
 		}
 	}
@@ -697,7 +740,7 @@ static int dhd_wifi_platform_load_pcie(void)
 {
 	return 0;
 }
-#endif 
+#endif /* BCMPCIE  */
 
 
 void dhd_wifi_platform_unregister_drv(void)
@@ -721,6 +764,10 @@ static int dhd_wifi_platform_load_sdio(void)
 
 	BCM_REFERENCE(i);
 	BCM_REFERENCE(adapter);
+	/* Sanity check on the module parameters
+	 * - Both watchdog and DPC as tasklets are ok
+	 * - If both watchdog and DPC are threads, TX must be deferred
+	 */
 	if (!(dhd_watchdog_prio < 0 && dhd_dpc_prio < 0) &&
 		!(dhd_watchdog_prio >= 0 && dhd_dpc_prio >= 0 && dhd_deferred_tx))
 		return -EINVAL;
@@ -732,7 +779,7 @@ static int dhd_wifi_platform_load_sdio(void)
 	}
 
 	sema_init(&dhd_registration_sem, 0);
-	
+	/* power up all adapters */
 	for (i = 0; i < dhd_wifi_platdata->num_adapters; i++) {
 		bool chip_up = FALSE;
 		int retry = POWERUP_MAX_RETRY;
@@ -756,7 +803,7 @@ static int dhd_wifi_platform_load_sdio(void)
 			}
 			err = wifi_platform_set_power(adapter, TRUE, WIFI_TURNON_DELAY);
 			if (err) {
-				
+				/* WL_REG_ON state unknown, Power off forcely */
 				wifi_platform_set_power(adapter, FALSE, WIFI_TURNOFF_DELAY);
 				continue;
 			} else {
@@ -791,6 +838,11 @@ static int dhd_wifi_platform_load_sdio(void)
 	}
 
 
+	/*
+	 * Wait till MMC sdio_register_driver callback called and made driver attach.
+	 * It's needed to make sync up exit from dhd insmod  and
+	 * Kernel MMC sdio device callback registration
+	 */
 	err = down_timeout(&dhd_registration_sem, msecs_to_jiffies(DHD_REGISTRATION_TIMEOUT));
 	if (err) {
 		DHD_ERROR(("%s: sdio_register_driver timeout or error \n", __FUNCTION__));
@@ -801,7 +853,7 @@ static int dhd_wifi_platform_load_sdio(void)
 	return err;
 
 fail:
-	
+	/* power down all adapters */
 	for (i = 0; i < dhd_wifi_platdata->num_adapters; i++) {
 		adapter = &dhd_wifi_platdata->adapters[i];
 		wifi_platform_set_power(adapter, FALSE, WIFI_TURNOFF_DELAY);
@@ -809,19 +861,19 @@ fail:
 	}
 #else
 
-	
+	/* x86 bring-up PC needs no power-up operations */
 	err = dhd_bus_register();
 
 #endif 
 
 	return err;
 }
-#else 
+#else /* BCMSDIO */
 static int dhd_wifi_platform_load_sdio(void)
 {
 	return 0;
 }
-#endif 
+#endif /* BCMSDIO */
 
 static int dhd_wifi_platform_load_usb(void)
 {

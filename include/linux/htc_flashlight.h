@@ -20,6 +20,9 @@
 #ifndef __HTC_FLASHLIGHT_H
 #define __HTC_FLASHLIGHT_H
 
+#include <linux/list.h>
+#include <linux/kernel.h>
+
 enum flashlight_mode_flags {
 	FL_MODE_OFF = 0,
 	FL_MODE_TORCH,
@@ -46,6 +49,14 @@ enum flashlight_mode_flags {
 	FL_MODE_VIDEO_TORCH_4,
 };
 
+struct htc_flashlight_dev {
+	u8 id;
+	struct list_head list;
+
+	int (*flash_func)(struct htc_flashlight_dev *, int, int);
+	int (*torch_func)(struct htc_flashlight_dev *, int, int);
+};
+
 int pmi8994_flashlight_control(int mode);
 int pmi8994_flashlight_mode(int mode);
 int pmi8994_flashlight_mode2(int mode2, int mode13);
@@ -54,5 +65,22 @@ extern int (*htc_flash_main)(int, int);
 extern int (*htc_torch_main)(int, int);
 extern int (*htc_flash_front)(int, int);
 extern int (*htc_torch_front)(int, int);
+
+#ifdef __KERNEL__
+#ifdef CONFIG_HTC_FLASHLIGHT
+int register_htc_flashlight(struct htc_flashlight_dev *);
+int unregister_htc_flashlight(struct htc_flashlight_dev *);
+#else
+static inline int register_htc_flashlight(struct htc_flashlight_dev *dev)
+{
+	return -EINVAL;
+}
+
+static inline int unregister_htc_flashlight(struct htc_flashlight_dev *dev)
+{
+	return -EINVAL;
+}
+#endif
+#endif
 
 #endif

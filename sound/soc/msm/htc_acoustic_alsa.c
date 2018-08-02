@@ -148,6 +148,7 @@ EXPORT_SYMBOL(HTC_AUD_HW_LIST);
 #if 0
 extern unsigned int system_rev;
 #endif
+//extern unsigned skuid;	//not implemented
 void htc_acoustic_register_spk_amp(enum SPK_AMP_TYPE type,int (*aud_spk_amp_f)(int, int), struct file_operations* ops)
 {
 	mutex_lock(&spk_amp_lock);
@@ -263,6 +264,8 @@ acoustic_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	if (_IOC_TYPE(cmd) != ACOUSTIC_IOCTL_MAGIC)
 		return -ENOTTY;
 
+//	if (_IOC_SIZE(cmd) > sizeof(struct tfa9895_i2c_buffer))
+//		return -EINVAL;
 
 	us32_size = _IOC_SIZE(cmd);
 
@@ -310,6 +313,8 @@ acoustic_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			s32_value = the_ops->get_htc_revision();
 		}
 		else {
+			/* return 1 means lastest hw using
+			 *              * default configuration */
 			s32_value = 1;
 		}
 		if(sizeof(s32_value) <= us32_size) {
@@ -510,11 +515,11 @@ acoustic_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
                 E("%s %d: ACOUSTIC_AMP_CTRL error. Please use climax tool instead!!!\n", __func__, __LINE__);
 #endif
 			}
-			
+			//htc audio: force return here to skip doing copy_to_user() at the end. let corresponding hs_amp or spk_amp to do related ioctl task.
 			kfree(buf);
 			mutex_unlock(&api_lock);
 			return 0;
-			
+			//~htc audio
 		}
 		else {
 			E("%s %d: ACOUSTIC_AMP_CTRL error.\n", __func__, __LINE__);
@@ -652,7 +657,7 @@ static ssize_t acoustic_write(struct file * filp, const char __user * user_buffe
 
 	E("%s: %s size %zu\n", __func__, buffer, size);
 
-    
+    //REMEMBER TO IGNORE NULL TERMINATOR STRING '\0'
 	if(0==strncmp(STRING_ADSPCRASH, buffer, sizeof(STRING_ADSPCRASH)-1))
 	{
 		E("%s: %s %zu\n", __func__, STRING_ADSPCRASH, sizeof(STRING_ADSPCRASH)-1);
@@ -744,6 +749,7 @@ void htc_amp_power_enable(bool enable)
 		the_amp_power_ops->set_amp_power_enable(enable);
 }
 
+#ifndef CONFIG_USE_CODEC_MBHC //htc_audio
 static int htc_acoustic_hsnotify(int on)
 {
 	int i = 0;
@@ -756,6 +762,7 @@ static int htc_acoustic_hsnotify(int on)
 
 	return 0;
 }
+#endif
 
 static int aud_ftm_sim_gpio_config(void *user_data, enum AUD_FTM_BTPCM_MODE mode)
 {
@@ -796,6 +803,7 @@ static int aud_ftm_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+/* Call this function with aud_ftm_lock locked. */
 static ssize_t process_ftm_read(char *gpio_values)
 {
 	int pin_state[4] = {0};
@@ -821,15 +829,16 @@ static ssize_t process_ftm_read(char *gpio_values)
 			return ret;
 		}
 
-		*gpio_values = (pin_state[0] & 1) +		
-				((pin_state[1] & 1) << 1) +	
-				((pin_state[2] & 1) << 2) +	
-				((pin_state[3] & 1) << 3);	
+		*gpio_values = (pin_state[0] & 1) +		/* frame clock or sync clock */
+				((pin_state[1] & 1) << 1) +	/* bit clock */
+				((pin_state[2] & 1) << 2) +	/* data in (BT to ACPU) */
+				((pin_state[3] & 1) << 3);	/* data out (ACPU to BT) */
 	}
 
 	return ret;
 }
 
+/* Call this function with aud_ftm_lock locked. */
 static ssize_t process_ftm_config(enum AUD_FTM_BTPCM_MODE mode, int sim_value)
 {
 	if (mode >= AUD_FTM_BTPCM_MODE_CNT || mode < 0)
@@ -846,7 +855,7 @@ static ssize_t process_ftm_config(enum AUD_FTM_BTPCM_MODE mode, int sim_value)
 			return -EIO;
 		}
 
-		
+		/* To release config BT PCM and config them as GPIO input */
 		if (aud_ftm_btpcm_func.gpio_config) {
 			aud_ftm_btpcm_func.gpio_config(aud_ftm_btpcm_func.user_data, AUD_FTM_BTPCM_MODE_GPIO);
 			aud_ftm_btpcm_mode = AUD_FTM_BTPCM_MODE_GPIO;
@@ -861,7 +870,7 @@ static ssize_t process_ftm_config(enum AUD_FTM_BTPCM_MODE mode, int sim_value)
 			return -EIO;
 		}
 
-		
+		/* To release config BT PCM and config them as PCM */
 		if (aud_ftm_btpcm_func.gpio_config) {
 			aud_ftm_btpcm_func.gpio_config(aud_ftm_btpcm_func.user_data, AUD_FTM_BTPCM_MODE_PCM);
 			aud_ftm_btpcm_mode = AUD_FTM_BTPCM_MODE_PCM;
@@ -870,7 +879,7 @@ static ssize_t process_ftm_config(enum AUD_FTM_BTPCM_MODE mode, int sim_value)
 			E("%s gpio_config not registered.\n", __func__);
 		}
 	} else if (mode == AUD_FTM_BTPCM_MODE_SIM) {
-		
+		/* BT PCM GPIO input simulation for API test on non-BRCM projects */
 		if (sim_value >= 0x0 && sim_value <= 0xf)
 			aud_ftm_btpcm_sim_state = sim_value;
 		else
@@ -1031,7 +1040,10 @@ static struct miscdevice acoustic_misc = {
 static int __init acoustic_init(void)
 {
 	int ret = 0;
+
+#ifndef CONFIG_USE_CODEC_MBHC //htc_audio
 	struct headset_notifier notifier;
+#endif
 
 	ret = misc_register(&acoustic_misc);
 	wake_lock_init(&htc_acoustic_wakelock, WAKE_LOCK_SUSPEND, "htc_acoustic");
@@ -1082,9 +1094,11 @@ static int __init acoustic_init(void)
 		return ret;
 	}
 
+#ifndef CONFIG_USE_CODEC_MBHC //htc_audio
 	notifier.id = HEADSET_REG_HS_INSERT;
 	notifier.func = htc_acoustic_hsnotify;
 	headset_notifier_register(&notifier);
+#endif
 
 	adsp_core_handle = NULL;
 

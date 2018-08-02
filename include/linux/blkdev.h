@@ -105,9 +105,9 @@ struct request {
 
 	int cpu;
 
-	ktime_t		enter_time;	
-	ktime_t		process_time;	
-	pid_t pid;	
+	ktime_t		enter_time;	/* when this req has been established */
+	ktime_t		process_time;	/* when this req has been sent to device */
+	pid_t pid;	/* from which pid? */
 
 	/* the following two fields are internal, NEVER access directly */
 	unsigned int __data_len;	/* total data len */

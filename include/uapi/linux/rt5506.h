@@ -1,3 +1,6 @@
+/*
+ * Definitions for rt5506 Headphone amp chip.
+ */
 #ifndef RT5506_H
 #define RT5506_H
 
@@ -8,7 +11,7 @@
 #include <linux/regulator/consumer.h>
 #endif
 
-#define MSM8994_LDO_WR (0) 
+#define MSM8994_LDO_WR (0) /* Workaround for 8994 AKM current leakage issue, defined same as in msm8994.c */
 
 #define RT5506_I2C_NAME "rt5506"
 #define MAX_REG_DATA 15
@@ -110,12 +113,15 @@ struct rt55xx_comm_data {
 
 struct rt55xx_config_data {
     unsigned int mode_num;
-    struct rt55xx_comm_data cmd_data[RT55XX_MAX_MODE];  
+    struct rt55xx_comm_data cmd_data[RT55XX_MAX_MODE];  /* [mode][mode_kind][reserve][cmds..] */
 };
 
 #define RT55XX_IOCTL_MAGIC        'g'
+//#define RT55XX_SET_CONFIG         _IOW(RT55XX_IOCTL_MAGIC, 0x01, unsigned)
+//#define RT55XX_READ_CONFIG        _IOR(RT55XX_IOCTL_MAGIC, 0x02, unsigned)
 #define RT55XX_SET_MODE           _IOW(RT55XX_IOCTL_MAGIC, 0x03, int)
 #define RT55XX_SET_PARAM          _IOW(RT55XX_IOCTL_MAGIC, 0x04, struct rt55xx_config_data)
+//#define RT55XX_WRITE_REG          _IOW(RT55XX_IOCTL_MAGIC, 0x07, unsigned)
 #define RT55XX_QUERY_OM           _IOR(RT55XX_IOCTL_MAGIC, 0x08, int)
 
 #if MSM8994_LDO_WR

@@ -22,6 +22,7 @@
 
 #include "mdss_panel.h"
 #include "mdss_dsi_cmd.h"
+#include "mdss_htc_util.h"
 
 #define MMSS_SERDES_BASE_PHY 0x04f01000 /* mmss (De)Serializer CFG */
 
@@ -451,14 +452,16 @@ struct mdss_dsi_ctrl_pdata {
 
 	bool dfps_status;	/* dynamic refresh status */
 
-	
-	void *dsi_pwrctrl_data;			
+	/*HTC: ADD*/
+	void *dsi_pwrctrl_data;			/*hook panel power control*/
 	struct dsi_panel_cmds cabc_off_cmds;
 	struct dsi_panel_cmds cabc_ui_cmds;
 	struct dsi_panel_cmds cabc_video_cmds;
 	struct dsi_panel_cmds dimming_on_cmds;
 	struct dsi_panel_cmds sre_on_cmds;
 	struct dsi_panel_cmds sre_off_cmds;
+	int lcmio_1v8_en;
+	struct cali_gain cali_gain;
 
 	u32 sre_ebi_value;
 };
