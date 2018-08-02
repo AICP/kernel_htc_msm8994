@@ -21,20 +21,28 @@
 
 #define CONFIG_CXD224X_NFC_RST
 #define CXDNFC_MAGIC 'S'
+/*
+ * CXDNFC power control via ioctl
+ * CXDNFC_POWER_CTL(0): power off
+ * CXDNFC_POWER_CTL(1): power on
+ * CXDNFC_WAKE_CTL(0): PON HIGH (normal power mode)
+ * CXDNFC_WAKE_CTL(1): PON LOW (low power mode)
+ * CXDNFC_WAKE_RST():  assert XRST
+ */
 #define CXDNFC_POWER_CTL		_IO(CXDNFC_MAGIC, 0x01)
 #define CXDNFC_WAKE_CTL			_IO(CXDNFC_MAGIC, 0x02)
 #define CXDNFC_RST_CTL			_IO(CXDNFC_MAGIC, 0x03)
 
-#define CXDNFC_RST_ACTIVE 1            
+#define CXDNFC_RST_ACTIVE 1            /* ActiveHi = 1, ActiveLow = 0 */
 struct cxd224x_platform_data {
 	unsigned int irq_gpio;
 	uint32_t irq_gpio_flags;
-	unsigned int en_gpio;	
+	unsigned int en_gpio;	// FEL_EN : PM8994_MPP_8
 	uint32_t en_gpio_flags;
-	unsigned int rst_gpio;	
-	unsigned int wake_gpio;	
+	unsigned int rst_gpio;	// FEL_RST : GPIO_30
+	unsigned int wake_gpio;	// FEL_PON : GPIO_76 
 	uint32_t wake_gpio_flags;
-	unsigned int rfs_gpio;	
+	unsigned int rfs_gpio;	// FEL_RFS : GPIO_75 
 };
 
 #endif

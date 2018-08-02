@@ -1330,6 +1330,7 @@ struct super_block {
 	 */
 	int s_stack_depth;
 
+	/* async-fsync */
 #define FLAG_ASYNC_FSYNC       0x1
 	unsigned int fsync_flags;
 };
@@ -1573,6 +1574,7 @@ struct file_operations {
 	long (*fallocate)(struct file *file, int mode, loff_t offset,
 			  loff_t len);
 	int (*show_fdinfo)(struct seq_file *m, struct file *f);
+	/* get_lower_file is for stackable file system */
 	struct file* (*get_lower_file)(struct file *f);
 };
 

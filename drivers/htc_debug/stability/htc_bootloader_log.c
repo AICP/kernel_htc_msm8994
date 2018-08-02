@@ -20,6 +20,7 @@
 #include <linux/of_platform.h>
 #include <linux/of_fdt.h>
 #include <linux/htc_debug_tools.h>
+#include <asm/uaccess.h>
 
 
 #define RAMLOG_COMPATIBLE_NAME "htc,bldr_log"
@@ -28,6 +29,7 @@
 
 #define BOOT_DEBUG_MAGIC		0xAACCBBDD
 
+/* Header structure defined in LK */
 struct bldr_log_header {
 	uint32_t magic;
 	uint32_t offset;
@@ -39,9 +41,9 @@ unsigned long bl_last_log_buf_size, bl_cur_log_buf_size;
 
 static int bldr_log_check_header(struct bldr_log_header *header, unsigned long bldr_log_size)
 {
-	
+	/* Check magic first */
 	if (header->magic == BOOT_DEBUG_MAGIC) {
-		
+		/* Check offset range */
 		if (header->offset >= sizeof(struct bldr_log_header) &&
 		    header->offset <  sizeof(struct bldr_log_header) + bldr_log_size)
 			return 1;
@@ -64,12 +66,12 @@ static void bldr_log_parser(const char *bldr_log, char *bldr_log_buf, unsigned l
 		char *bldr_log_buf_ptr = bldr_log_buf;
 		unsigned long bldr_log_bottom_size, bldr_log_top_size;
 
-		
+		/* Bottom half part  */
 		bldr_log_bottom_size = bldr_log_size - header->offset;
 		memcpy(bldr_log_buf_ptr, bldr_log + header->offset, bldr_log_bottom_size);
 		bldr_log_buf_ptr += bldr_log_bottom_size;
 
-		
+		/* Top half part  */
 		bldr_log_top_size = header->offset - sizeof(struct bldr_log_header);
 		memcpy(bldr_log_buf_ptr, bldr_log + sizeof(struct bldr_log_header), bldr_log_top_size);
 
@@ -89,10 +91,13 @@ ssize_t bldr_last_log_read_once(char __user *userbuf, ssize_t klog_size)
 {
 	ssize_t len = 0;
 
-	len = (klog_size - bl_last_log_buf_size > 0)? (ssize_t)bl_last_log_buf_size : 0;
+	len = (klog_size > bl_last_log_buf_size)? (ssize_t)bl_last_log_buf_size : 0;
 
 	if (0 < len) {
-		memcpy(userbuf, bl_last_log_buf, len);
+		if (copy_to_user(userbuf, bl_last_log_buf, len)) {
+			pr_warn("bldr_last_log_read_once, copy_to_user failed\n");
+			return 0;
+		}
 	}
 	return len;
 }
@@ -101,10 +106,13 @@ ssize_t bldr_log_read_once(char __user *userbuf, ssize_t klog_size)
 {
 	ssize_t len = 0;
 
-	len = (klog_size - bl_cur_log_buf_size > 0)? (ssize_t)bl_cur_log_buf_size : 0;
+	len = (klog_size > bl_cur_log_buf_size)? (ssize_t)bl_cur_log_buf_size : 0;
 
 	if (0 < len) {
-		memcpy(userbuf, bl_cur_log_buf, len);
+		if(copy_to_user(userbuf, bl_cur_log_buf, len)) {
+			pr_warn("bldr_log_read_once, copy_to_user failed\n");
+			return 0;
+		}
 	}
 	return len;
 }

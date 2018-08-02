@@ -169,6 +169,7 @@ SYSCALL_DEFINE1(syncfs, int, fd)
 }
 
 extern int cancel_fsync;
+/* return 1: can async fsync, 0: otherwise */
 static int async_fsync(struct file *file)
 {
 	struct inode *inode = file->f_mapping->host;

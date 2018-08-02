@@ -646,6 +646,7 @@ int snd_usb_parse_audio_interface(struct snd_usb_audio *chip, int iface_no)
 		fp->clock = clock;
 		INIT_LIST_HEAD(&fp->list);
 		fp->chmap = convert_chmap(num_channels, chconfig, protocol);
+		INIT_LIST_HEAD(&fp->list);
 
 		/* some quirks for attributes here */
 
@@ -680,6 +681,7 @@ int snd_usb_parse_audio_interface(struct snd_usb_audio *chip, int iface_no)
 
 		/* ok, let's parse further... */
 		if (snd_usb_parse_audio_format(chip, fp, format, fmt, stream, alts) < 0) {
+			list_del(&fp->list); /* unlink for avoiding double-free */
 			kfree(fp->rate_table);
 			kfree(fp->chmap);
 			kfree(fp);

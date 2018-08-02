@@ -29,6 +29,8 @@ struct attribute_status htc_attr_status[] = {
 	{"pp_pcc", 0, 0, 0},
 	{"sre_level", 0, 0, 0},
 	{"limit_brightness", MDSS_MAX_BL_BRIGHTNESS, MDSS_MAX_BL_BRIGHTNESS, MDSS_MAX_BL_BRIGHTNESS},
+	{"bklt_cali_enable", 0, 0, 0},
+	{"disp_cali_enable", 0, 0, 0},
 };
 
 int dspp_pcc_mode_cnt;
@@ -75,14 +77,22 @@ static ssize_t dsi_cmd_write(
 	if (!ctrl_instance)
 		return count;
 
-	
+	/* end of string */
 	debug_buf[count] = 0;
 
-	
+	/* Format:
+	ex: echo 39 51 ff > dsi_cmd
+	read ex: echo 06 52 00 > dsi_cmd
+	     [type] space [addr] space [value]
+	     +--+--+-----+--+--+------+--+--+-
+	bit   0  1    2   3  4     5   6  7
+	ex:    39          51           ff
+	*/
+	/* Calc the count, min count = 9, format: type addr value */
 	cnt = (count) / 3 - 1;
 	debug_cmd.dchdr.dlen = cnt;
 
-	
+	/* Get the type */
 	sscanf(debug_buf, "%x", &type);
 
 	if (type == DTYPE_DCS_LWRITE)
@@ -96,7 +106,7 @@ static ssize_t dsi_cmd_write(
 
 	PR_DISP_INFO("%s: cnt=%d, type=0x%x\n", __func__, cnt, type);
 
-	
+	/* Get the cmd and value */
 	for (i = 0; i < cnt; i++) {
 		if (i >= DCS_MAX_CNT) {
 			PR_DISP_INFO("%s: DCS command count over DCS_MAX_CNT, Skip these commands.\n", __func__);
@@ -117,7 +127,7 @@ static ssize_t dsi_cmd_write(
 		cmdreq.flags = CMD_REQ_COMMIT | CMD_REQ_RX;
 		cmdreq.rlen = 4;
 		cmdreq.rbuf = dsi_rbuf;
-		cmdreq.cb = dsi_read_cb; 
+		cmdreq.cb = dsi_read_cb; /* call back */
 
 		mdss_dsi_cmdlist_put(ctrl_instance, &cmdreq);
 	} else {
@@ -192,6 +202,70 @@ void htc_debugfs_init(struct msm_fb_data_type *mfd)
 	return;
 }
 
+#define RGB_MIN_COUNT   9
+static struct cali_gain aux_gain;
+static ssize_t rgb_gain_show(struct device *dev,
+        struct device_attribute *attr, char *buf)
+{
+	ssize_t ret =0;
+	ret = scnprintf(buf, PAGE_SIZE, "%s%x\n%s%x\n%s%x\n", "GAIN_R=0x", aux_gain.R, "GAIN_G=0x",
+				aux_gain.G, "GAIN_B=0x", aux_gain.B);
+	return ret;
+}
+
+static ssize_t rgb_gain_store(struct device *dev, struct device_attribute *attr,
+        const char *buf, size_t count)
+{
+	unsigned temp, temp1, temp2;
+
+	if (count < RGB_MIN_COUNT)
+		return -EFAULT;
+
+	/* Format:
+	ex: echo f8 f0 ef > disp_cali
+	    [gain.R] space [gain.G] space [gain.B]
+	    +---+---+------+---+---+------+---+---+-
+	bit   0   1    2     3   4     5    6   7
+	ex:     f8             f0             ef
+	*/
+	/* min count = 9, format: gain.R gain.G gain.B */
+
+	if (sscanf(buf, "%x %x %x ", &temp, &temp1, &temp2) != 3) {
+		PR_DISP_ERR("%s sscanf buf fail\n",__func__);
+	} else if (RGB_CHECK(temp) && RGB_CHECK(temp1) && RGB_CHECK(temp2)) {
+		aux_gain.R = temp;
+		aux_gain.G = temp1;
+		aux_gain.B = temp2;
+		PR_DISP_INFO("%s %d, gain_r=%x, gain_g=%x, gain_b=%x \n",__func__, __LINE__,
+				aux_gain.R, aux_gain.G, aux_gain.B);
+	}
+
+	return count;
+}
+static ssize_t bklt_gain_show(struct device *dev,
+        struct device_attribute *attr, char *buf)
+{
+	ssize_t ret =0;
+	ret = scnprintf(buf, PAGE_SIZE, "%s%d\n", "GAIN_BKLT=", aux_gain.BKL);
+	return ret;
+}
+
+static ssize_t bklt_gain_store(struct device *dev, struct device_attribute *attr,
+        const char *buf, size_t count)
+{
+	int temp = 0;
+
+	if (sscanf(buf, "%d", &temp) != 1) {
+		PR_DISP_ERR("%s sscanf buf fail\n",__func__);
+	} else if(BRI_GAIN_CHECK(temp)) {
+		aux_gain.BKL = temp;
+		PR_DISP_INFO("[DISP]%s %d, gain_bkl=%d \n",__func__, __LINE__, aux_gain.BKL);
+	}
+
+	return count;
+}
+
+
 static unsigned backlightvalue = 0;
 static unsigned dua_backlightvalue = 0;
 static ssize_t camera_bl_show(struct device *dev,
@@ -242,8 +316,35 @@ err_out:
 	return count;
 }
 
+/*
+HTC native mipi command format :
 
-#define SLEEPMS_OFFSET(strlen) (strlen+1) 
+	"format string", < sleep ms >,  <cmd leng>, ['cmd bytes'...] ;
+
+	"format string" :
+		"DTYPE_DCS_WRITE"  : 0x05
+		"DTYPE_DCS_WRITE1" : 0x15
+		"DTYPE_DCS_LWRITE" : 0x39
+		"DTYPE_GEN_WRITE"  : 0x03
+		"DTYPE_GEN_WRITE1" : 0x13
+		"DTYPE_GEN_WRITE2" : 0x23
+		"DTYPE_GEN_LWRITE" : 0x29
+
+	Example :
+		htc-fmt,mdss-dsi-off-command =
+					"DTYPE_DCS_WRITE", <1>, <0x02>, [28 00],
+					"DTYPE_DCS_WRITE", <120>, <0x02>, [10 00];
+		htc-fmt,display-on-cmds = "DTYPE_DCS_WRITE", <0x0A>, <0x02>, [29 00];
+		htc-fmt,cabc-off-cmds = "DTYPE_DCS_LWRITE", <1>, <0x02>, [55 00];
+		htc-fmt,cabc-ui-cmds =
+			"DTYPE_DCS_LWRITE", <5>, <0x02>, [55 02],
+			"DTYPE_DCS_LWRITE", <1>, <0x02>, [5E 11],
+			"DTYPE_DCS_LWRITE", <1>, <0x0A>, [CA 2D 27 26 25 24 22 21 21 20],
+			"DTYPE_DCS_LWRITE", <1>, <0x23>, [CE 00 00 00 00 10 10 16 16 16 16 16 16 16 16 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00];
+
+*/
+
+#define SLEEPMS_OFFSET(strlen) (strlen+1) /* < sleep ms>, [cmd len ... */
 #define CMDLEN_OFFSET(strlen)  (SLEEPMS_OFFSET(strlen)+sizeof(const __be32))
 #define CMD_OFFSET(strlen)     (CMDLEN_OFFSET(strlen)+sizeof(const __be32))
 
@@ -285,7 +386,7 @@ int htc_mdss_dsi_parse_dcs_cmds(struct device_node *np,
 	if (!prop || !len || !(prop->length) || !(prop->value)) {
 		PR_DISP_ERR("%s: failed, key=%s  [%d : %d : %p]\n", __func__, cmd_key,
 			len, (prop ? prop->length : -1), (prop ? prop->value : 0) );
-		
+		//pr_err("%s: failed, key=%s\n", __func__, cmd_key);
 		return -ENOMEM;
 	}
 
@@ -301,7 +402,7 @@ int htc_mdss_dsi_parse_dcs_cmds(struct device_node *np,
 				break;
 			curcmdtype++;
 		};
-		if( !dsi_cmd_map[curcmdtype].cmdtype_strlen ) 
+		if( !dsi_cmd_map[curcmdtype].cmdtype_strlen ) /* no matching */
 			break;
 
 		i = be32_to_cpup((__be32 *)&data[CMDLEN_OFFSET(dsi_cmd_map[curcmdtype].cmdtype_strlen)]);
@@ -414,7 +515,7 @@ int mdss_mdp_parse_dt_dspp_pcc_setting(struct platform_device *pdev)
 			int i = 0;
 
 			dspp_pcc_mode[mode_index].dspp_pcc_config_cnt = 0;
-			
+			/* mode-name */
 			rc = of_property_read_string(pcc_node,
 				"htc,pcc-mode", &st);
 			if (rc) {
@@ -428,10 +529,10 @@ int mdss_mdp_parse_dt_dspp_pcc_setting(struct platform_device *pdev)
 				ARRAY_SIZE(dspp_pcc_mode[mode_index].mode_name),
 				"%s", st);
 
-			
+			/* pcc-enable */
 			of_property_read_u32(pcc_node, "htc,pcc-enable", &dspp_pcc_mode[mode_index].pcc_enable);
 
-			
+			/* pcc-configs */
 			pp_pcc_arr = of_get_property(pcc_node, "htc,pcc-configs", &pp_pcc_config_len);
 
 			if (!pp_pcc_arr) {
@@ -444,7 +545,7 @@ int mdss_mdp_parse_dt_dspp_pcc_setting(struct platform_device *pdev)
 
 			pp_pcc_config_len /= 2 * sizeof(u32);
 			if (pp_pcc_config_len) {
-				
+				/* Create dspp_pcc mode configs */
 				dspp_pcc_mode[mode_index].dspp_pcc_config = devm_kzalloc(&pdev->dev,
 					sizeof(*dspp_pcc_mode[mode_index].dspp_pcc_config) * pp_pcc_config_len, GFP_KERNEL);
 				pcc = dspp_pcc_mode[mode_index].dspp_pcc_config;
@@ -498,12 +599,20 @@ static DEVICE_ATTR(mdss_pp_hue, S_IRUGO | S_IWUSR, attrs_show, attr_store);
 static DEVICE_ATTR(pp_pcc, S_IRUGO | S_IWUSR, pcc_attrs_show, pcc_attr_store);
 static DEVICE_ATTR(sre_level, S_IRUGO | S_IWUSR, attrs_show, attr_store);
 static DEVICE_ATTR(limit_brightness, S_IRUGO | S_IWUSR, attrs_show, attr_store);
+static DEVICE_ATTR(bklt_cali, S_IRUGO | S_IWUSR, bklt_gain_show, bklt_gain_store);
+static DEVICE_ATTR(bklt_cali_enable, S_IRUGO | S_IWUSR, attrs_show, attr_store);
+static DEVICE_ATTR(disp_cali, S_IRUGO | S_IWUSR, rgb_gain_show, rgb_gain_store);
+static DEVICE_ATTR(disp_cali_enable, S_IRUGO | S_IWUSR, attrs_show, attr_store);
 static struct attribute *htc_extend_attrs[] = {
 	&dev_attr_backlight_info.attr,
 	&dev_attr_cabc_level_ctl.attr,
 	&dev_attr_mdss_pp_hue.attr,
 	&dev_attr_sre_level.attr,
 	&dev_attr_limit_brightness.attr,
+	&dev_attr_bklt_cali.attr,
+	&dev_attr_bklt_cali_enable.attr,
+	&dev_attr_disp_cali.attr,
+	&dev_attr_disp_cali_enable.attr,
 	NULL,
 };
 
@@ -515,6 +624,10 @@ void htc_register_attrs(struct kobject *led_kobj, struct msm_fb_data_type *mfd)
 {
 	int rc;
 	struct mdss_panel_info *panel_info = mfd->panel_info;
+	struct mdss_panel_data *pdata = dev_get_platdata(&mfd->pdev->dev);
+	struct mdss_dsi_ctrl_pdata *ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
+													panel_data);
+	struct cali_gain *gain = &ctrl_pdata->cali_gain;;
 
 	rc = sysfs_create_group(led_kobj, &htc_extend_attr_group);
 	if (rc)
@@ -525,11 +638,22 @@ void htc_register_attrs(struct kobject *led_kobj, struct msm_fb_data_type *mfd)
 		if (rc)
 			pr_err("sysfs creation pp_pcc failed, rc=%d\n", rc);
 	}
-	
+	/* hue initial value */
 	htc_attr_status[HUE_INDEX].req_value = panel_info->mdss_pp_hue;
 
-	
+	/* pcc initial value was disable*/
 	htc_attr_status[PP_PCC_INDEX].req_value = 0;
+
+	/* rgb calibration initial value*/
+	if (RGB_CHECK(gain->R) && RGB_CHECK(gain->G) && RGB_CHECK(gain->B)) {
+		aux_gain.R = gain->R;
+		aux_gain.G = gain->G;
+		aux_gain.B = gain->B;
+	}
+
+	/* backlight calibration initial value*/
+	if (BRI_GAIN_CHECK(gain->BKL))
+		aux_gain.BKL = gain->BKL;
 
 	return;
 }
@@ -639,7 +763,7 @@ bool htc_set_sre(struct msm_fb_data_type *mfd)
 
 	memset(&cmdreq, 0, sizeof(cmdreq));
 
-	
+	/* Check EBI variable for SRE function */
 	if (!sre_state) {
 		cmdreq.cmds = ctrl_pdata->sre_off_cmds.cmds;
 		cmdreq.cmds_cnt = ctrl_pdata->sre_off_cmds.cmd_cnt;
@@ -672,7 +796,7 @@ void htc_set_limit_brightness(struct msm_fb_data_type *mfd)
 
 	panel_info->brightness_max = htc_attr_status[LIM_BRI_INDEX].req_value;
 
-	bl_lvl = htc_backlight_transfer_bl_brightness(panel_info->brightness_max, panel_info, true);
+	bl_lvl = htc_backlight_transfer_bl_brightness(panel_info->brightness_max, mfd, true);
 	if (bl_lvl < 0) {
 		MDSS_BRIGHT_TO_BL(bl_lvl, panel_info->brightness_max, mfd->panel_info->bl_max,
 							MDSS_MAX_BL_BRIGHTNESS);
@@ -680,20 +804,110 @@ void htc_set_limit_brightness(struct msm_fb_data_type *mfd)
 
 	nits_lvl = htc_backlight_bl_to_nits(bl_lvl, panel_info);
 	if (nits_lvl < 0) {
-		
+		/* Not support BL nits transfer */
 		panel_info->nits_bl_table.max_nits = 0;
 	} else {
 		panel_info->nits_bl_table.max_nits = nits_lvl;
 	}
 
 	if (bl_lvl < mfd->bl_level) {
-		
+		/* Update the BL level when limit bl level less than current bl level */
 		mfd->bl_updated = false;
 		mfd->unset_bl_level = bl_lvl;
 	}
 
 	htc_attr_status[LIM_BRI_INDEX].cur_value = htc_attr_status[LIM_BRI_INDEX].req_value;
 	PR_DISP_INFO("%s limit_brightness = %d, nits = %d\n", __func__, panel_info->brightness_max, panel_info->nits_bl_table.max_nits);
+	return;
+}
+
+void htc_update_bl_cali_data(struct msm_fb_data_type *mfd)
+{
+	struct mdss_panel_data *pdata;
+	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
+	struct cali_gain *gain = NULL;
+	int bl_lvl = 0;
+
+	pdata = dev_get_platdata(&mfd->pdev->dev);
+
+	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
+					panel_data);
+
+	gain = &ctrl_pdata->cali_gain;
+
+	if (htc_attr_status[BL_CALI_ENABLE_INDEX].cur_value == htc_attr_status[BL_CALI_ENABLE_INDEX].req_value)
+		return;
+
+	htc_attr_status[BL_CALI_ENABLE_INDEX].cur_value = htc_attr_status[BL_CALI_ENABLE_INDEX].req_value;
+
+	/* update backlight calibration data from user change*/
+	if ((aux_gain.BKL != gain->BKL)) {
+		gain->BKL = aux_gain.BKL;
+		PR_DISP_INFO("%s change bkl calibration value, bkl=%d\n", __func__, gain->BKL);
+	}
+
+	if (!BRI_GAIN_CHECK(gain->BKL)) {
+		PR_DISP_INFO("%s bkl=%d out of range\n", __func__, gain->BKL);
+		return;
+	}
+
+	if (mfd->bl_level && mfd->last_bri) {
+		/* always calibrates based on last time brightness value rather than calibrated brightness */
+		bl_lvl = htc_backlight_transfer_bl_brightness(mfd->last_bri, mfd, true);
+
+		/* Update the brightness when bl_cali be set */
+		if (bl_lvl) {
+			mfd->bl_updated = false;
+			mfd->unset_bl_level = bl_lvl;
+		}
+	}
+
+	PR_DISP_INFO("%s bl_cali = %d, unset_bl_level=%d \n", __func__, gain->BKL,  mfd->unset_bl_level);
+	return;
+}
+
+void htc_update_rgb_cali_data(struct msm_fb_data_type *mfd, struct mdp_pcc_cfg_data *config)
+{
+	struct mdss_panel_data *pdata;
+	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
+	struct cali_gain *gain = NULL;
+
+	pdata = dev_get_platdata(&mfd->pdev->dev);
+
+	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
+					panel_data);
+
+	gain = &ctrl_pdata->cali_gain;
+
+	/*
+	 * Allow update request value directly, since it could apply calibration result without switching back
+	 * to original un-calibration situation leads to flicker
+	 */
+	htc_attr_status[RGB_CALI_ENABLE_INDEX].cur_value = htc_attr_status[RGB_CALI_ENABLE_INDEX].req_value;
+
+	/* update rgb calibration data from user change*/
+	if ((aux_gain.R != gain->R) || (aux_gain.G != gain->G) || (aux_gain.B != gain->B)) {
+		gain->R = aux_gain.R;
+		gain->G = aux_gain.G;
+		gain->B = aux_gain.B;
+		PR_DISP_INFO("%s change calibration value, RGB(0x%x, 0x%x, 0x%x) \n",
+				__func__, gain->R, gain->G, gain->B);
+	}
+
+	if (!RGB_CHECK(gain->R) || !RGB_CHECK(gain->G) || !RGB_CHECK(gain->B)) {
+		PR_DISP_INFO("%s RGB(0x%x, 0x%x, 0x%x) out of range\n", __func__, gain->R, gain->G, gain->B);
+		return;
+	}
+
+	/* Apply calibration data to config only if calibration enabled */
+	if (htc_attr_status[RGB_CALI_ENABLE_INDEX].cur_value) {
+		config->r.r = RGB_CALIBRATION(config->r.r, gain->R);
+		config->g.g = RGB_CALIBRATION(config->g.g, gain->G);
+		config->b.b = RGB_CALIBRATION(config->b.b, gain->B);
+		PR_DISP_INFO("%s apply calibration value, RGB(0x%x, 0x%x, 0x%x) \n",
+			__func__, gain->R, gain->G, gain->B);
+	}
+
 	return;
 }
 
@@ -744,7 +958,7 @@ void htc_dimming_on(struct msm_fb_data_type *mfd)
 
 void htc_dimming_off(void)
 {
-	
+	/* Delete dimming workqueue */
 	cancel_delayed_work_sync(&dimming_work);
 }
 
@@ -754,9 +968,10 @@ void htc_set_pp_pa(struct mdss_mdp_ctl *ctl)
 	struct mdss_data_type *mdata;
 	struct mdss_mdp_mixer *mixer;
 	u32 opmode = 0;
+/*        u32 base = 0, opmode;*/
 	char __iomem *basel;
 
-	
+	/* PP Picture Adjustment(PA) */
 	if (htc_attr_status[HUE_INDEX].req_value == htc_attr_status[HUE_INDEX].cur_value)
 		return;
 
@@ -766,12 +981,15 @@ void htc_set_pp_pa(struct mdss_mdp_ctl *ctl)
 	mdata = mdss_mdp_get_mdata();
 	mixer = mdata->mixer_intf;
 
+/*        base = MDSS_MDP_REG_DSPP_OFFSET(0);*/
 	basel = mixer->dspp_base;
 
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
 
+/*        MDSS_MDP_REG_WRITE(base + MDSS_MDP_REG_DSPP_PA_BASE, htc_attr_status[HUE_INDEX].req_value);*/
 
-	opmode |= (1 << 20); 
+/*        opmode = MDSS_MDP_REG_READ(base);*/
+	opmode |= (1 << 20); /* PA_EN */
 	writel_relaxed(opmode, basel + MDSS_MDP_REG_DSPP_OP_MODE);
 
 	ctl->flush_bits |= BIT(13);
@@ -789,11 +1007,12 @@ void htc_set_pp_pcc(struct mdss_mdp_ctl *ctl)
 	struct mdss_mdp_mixer *mixer;
 	struct mdss_dspp_pcc_config *pcc;
 	u32 opmode = 0, req_val = 0;
+/*        u32 base = 0, opmode, req_val;*/
 	char __iomem *basel;
 	int i;
 	req_val = htc_attr_status[PP_PCC_INDEX].req_value;
 
-	
+	/* PP Panel Color Correction(PCC) */
 	if (req_val == htc_attr_status[PP_PCC_INDEX].cur_value)
 		return;
 
@@ -814,20 +1033,23 @@ void htc_set_pp_pcc(struct mdss_mdp_ctl *ctl)
 		return;
 	}
 
+/*        base = MDSS_MDP_REG_DSPP_OFFSET(0);*/
 	basel = mixer->dspp_base;
 
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
+/*        opmode = MDSS_MDP_REG_READ(base);*/
 
 	if(dspp_pcc_mode[req_val].pcc_enable) {
-		opmode |= MDSS_MDP_DSPP_OP_PCC_EN; 
+		opmode |= MDSS_MDP_DSPP_OP_PCC_EN; /* PCC_EN: enabled */
 		pcc = dspp_pcc_mode[req_val].dspp_pcc_config;
 		if (pcc)
 			for (i = 0; i < dspp_pcc_mode[req_val].dspp_pcc_config_cnt; i++) {
 				pr_debug("%s: pcc->val = %d\n", __func__, pcc->val);
+/*                                MDSS_MDP_REG_WRITE(base + pcc->reg_offset, pcc->val);*/
 				pcc++;
 			}
 	} else {
-		opmode &= ~MDSS_MDP_DSPP_OP_PCC_EN; 
+		opmode &= ~MDSS_MDP_DSPP_OP_PCC_EN; /* PCC_EN: disabled */
 	}
 
 	writel_relaxed(opmode, basel + MDSS_MDP_REG_DSPP_OP_MODE);
@@ -841,22 +1063,44 @@ void htc_set_pp_pcc(struct mdss_mdp_ctl *ctl)
 	PR_DISP_INFO("%s pp_pcc mode = 0x%x\n", __func__, req_val);
 }
 
-int htc_backlight_transfer_bl_brightness(int val, struct mdss_panel_info *panel_info, bool brightness_to_bl)
+/**
+ * Backlight 1.0.
+ * htc_backlight_transfer_bl_brightness() -  Transfer BL level and Brightness level.
+ * Ref htc,brt-bl-table to map BL level and Brightness level.
+ * brightness_to_bl = true, The val was brigthness and return bl level.
+ * brightness_to_bl = false, The val was bl and return brightness level.
+ */
+int htc_backlight_transfer_bl_brightness(int val, struct msm_fb_data_type *mfd, bool brightness_to_bl)
 {
+	struct mdss_panel_info *panel_info = mfd->panel_info;
 	unsigned int result;
 	int index = 0;
 	u16 *val_table;
 	u16 *ret_table;
 	struct htc_backlight1_table *brt_bl_table = &panel_info->brt_bl_table;
 	int size = brt_bl_table->size;
+	struct mdss_panel_data *pdata;
+	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
+	struct cali_gain *gain = NULL;
+	unsigned int bl_cali = BL_CALI_DEF;
 
-	
+	pdata = dev_get_platdata(&mfd->pdev->dev);
+
+	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
+					panel_data);
+
+	gain = &ctrl_pdata->cali_gain;
+
+	/* Not define brt table */
 	if(!size || !brt_bl_table->brt_data || !brt_bl_table->bl_data)
 		return -ENOENT;
 
 	if (brightness_to_bl) {
 		val_table = brt_bl_table->brt_data;
 		ret_table = brt_bl_table->bl_data;
+		mfd->last_bri = val;
+		if (htc_attr_status[BL_CALI_ENABLE_INDEX].cur_value && BRI_GAIN_CHECK(gain->BKL))
+			bl_cali = gain->BKL;
 	} else {
 		val_table = brt_bl_table->bl_data;
 		ret_table = brt_bl_table->brt_data;
@@ -865,13 +1109,13 @@ int htc_backlight_transfer_bl_brightness(int val, struct mdss_panel_info *panel_
 	if (val <= 0){
 		result = 0;
 	} else if (val < val_table[0]) {
-		
+		/* Min value */
 		result = ret_table[0];
 	} else if (val >= val_table[size - 1]) {
-		
+		/* Max value */
 		result = ret_table[size - 1];
 	} else {
-		
+		/* Interpolation method */
 		result = val;
 		for(index = 0; index < size - 1; index++){
 			if (val >= val_table[index] && val <= val_table[index + 1]) {
@@ -890,12 +1134,21 @@ int htc_backlight_transfer_bl_brightness(int val, struct mdss_panel_info *panel_
 		}
 	}
 
-	pr_info("%s: mode=%d, %d transfer to %d\n",
-		__func__, brightness_to_bl, val, result);
+	if (brightness_to_bl)
+		result = BACKLIGHT_CALI(result, bl_cali);
+	pr_info("%s: mode=%d, bl_cali=%d, %d transfer to %d\n",
+		__func__, brightness_to_bl, bl_cali, val, result);
 
 	return result;
 }
 
+/**
+ * Backlight 2.0.
+ * htc_backlight_bl_to_nits() - Transfer Backlight level to 0.1 nits level.
+ * Ref htc,nits-bl-table to map nits and brightness.
+ * Backlight_bl_to_nits() should be called
+ * when we get lcd-backlight-nits device attribute value.
+ */
 int htc_backlight_bl_to_nits(int val, struct mdss_panel_info *panel_info)
 {
 	int index = 0, remainder = 0, max_index = 0;
@@ -937,9 +1190,14 @@ static void print_bl_log_suppressed(int val, int index, unsigned int code, int s
 	static int prev_val = 0;
 	static DEFINE_SPINLOCK(lock);
 
+	/**
+	 * The static value should be protect by critical section.
+	 * Apply spinlock to implement thread safety when critical section was fast.
+	 * We are need to disable the IRQ to avoid the deadlock.
+	 */
 	spin_lock_irqsave(&lock, flags);
 
-	
+	/* logging policy: discard logs within 1 (scale) nits change and within 500 ms */
 	print_log = time_after(jiffies, timeout);
 	print_log |= !prev_val || ((prev_val / scale) != index);
 	print_log |= !val;
@@ -951,7 +1209,7 @@ static void print_bl_log_suppressed(int val, int index, unsigned int code, int s
 		} else {
 			pr_info("%s: nits=%d, bl=%d", __func__, val, code);
 		}
-		
+		/* Set timeout to 500 ms */
 		timeout = jiffies + msecs_to_jiffies(500);
 		prev_val = val;
 	} else {
@@ -962,6 +1220,13 @@ static void print_bl_log_suppressed(int val, int index, unsigned int code, int s
 	spin_unlock_irqrestore(&lock, flags);
 }
 
+/**
+ * Backlight 2.0
+ * htc_backlight_nits_to_bl() -  Transfer 0.1 nits level to Backlight level.
+ * Ref htc,nits-bl-table to map nits and brightness.
+ * Backlight_nits_to_bl() should be called
+ * when we set lcd-backlight-nits device attribute value.
+ */
 int htc_backlight_nits_to_bl(int val, struct mdss_panel_info *panel_info)
 {
 	int index = 0, remainder = 0, max_index = 0;
@@ -979,7 +1244,7 @@ int htc_backlight_nits_to_bl(int val, struct mdss_panel_info *panel_info)
 	index = val / scale;
 	remainder = val % scale;
 
-	
+	/* Set to max bl table. */
 	if (index >= max_index) {
 		index = max_index;
 		remainder = 0;
@@ -989,10 +1254,10 @@ int htc_backlight_nits_to_bl(int val, struct mdss_panel_info *panel_info)
 		code1 = nits_bl_table->data[index];
 		code2 = nits_bl_table->data[index + 1];
 
-		
+		/* Interpolation method */
 		code = (code2 - code1) * remainder / scale + code1;
 	} else {
-		
+		/* We can direct map to bl table. */
 		code = nits_bl_table->data[index];
 	}
 

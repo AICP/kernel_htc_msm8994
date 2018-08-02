@@ -99,6 +99,14 @@ struct battery_info_reply {
 	u32 cable_ready;
 	s32 usb_temp;
 	u32 usb_overheat;
+	int vbus;
+	int max_iusb;
+	int chg_limit_reason;
+	int chg_stop_reason;
+	int consistent;
+	int aicl_ma;
+	unsigned int htc_extension;	/* for htc in-house sw */
+	unsigned int level_accu;
 };
 
 struct htc_battery_core {
@@ -106,6 +114,11 @@ struct htc_battery_core {
 	int (*func_show_batt_attr)(struct device_attribute *attr, char *buf);
 	int (*func_show_cc_attr)(struct device_attribute *attr, char *buf);
 	int (*func_show_htc_extension_attr)(struct device_attribute *attr, char *buf);
+	int (*func_show_charger_type_attr)(struct device_attribute *attr, char *buf);
+	int (*func_show_thermal_batt_temp_attr)(struct device_attribute *attr, char *buf);
+	int (*func_show_batt_bidata_attr)(struct device_attribute *attr, char *buf);
+	int (*func_show_consist_data_attr)(struct device_attribute *attr, char *buf);
+	int (*func_show_cycle_data_attr)(struct device_attribute *attr, char *buf);
 	int (*func_get_battery_info)(struct battery_info_reply *buffer);
 	int (*func_charger_control)(enum charger_control_flag);
 	int (*func_context_event_handler)(enum batt_context_event);

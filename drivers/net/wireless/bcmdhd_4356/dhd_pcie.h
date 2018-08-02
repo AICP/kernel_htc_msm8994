@@ -37,8 +37,8 @@
 #else
 #include <mach/msm_pcie.h>
 #endif
-#endif 
-#endif 
+#endif /* CONFIG_ARCH_MSM */
+#endif /* SUPPORT_LINKDOWN_RECOVERY */
 #ifdef DHD_USE_IDLECOUNT
 #include <linux/mutex.h>
 #include <linux/wait.h>
@@ -49,13 +49,14 @@
 
 #ifndef MAX_IDLE_COUNT
 #define MAX_IDLE_COUNT 16
-#endif 
+#endif /* MAX_IDLE_COUNT */
 
 #ifndef MAX_RESUME_WAIT
 #define MAX_RESUME_WAIT 100
-#endif 
-#endif 
+#endif /* MAX_RESUME_WAIT */
+#endif /* DHD_USE_IDLECOUNT */
 
+/* defines */
 
 #define PCMSGBUF_HDRLEN 0
 #define DONGLE_REG_MAP_SIZE (32 * 1024)
@@ -64,26 +65,28 @@
 #ifdef DHD_DEBUG
 #define DHD_PCIE_SUCCESS 0
 #define DHD_PCIE_FAILURE 1
-#endif 
+#endif /* DHD_DEBUG */
 #define	REMAP_ENAB(bus)			((bus)->remap)
 #define	REMAP_ISADDR(bus, a)		(((a) >= ((bus)->orig_ramsize)) && ((a) < ((bus)->ramsize)))
 
 #define MAX_DHD_TX_FLOWS	256
 
+/* user defined data structures */
 #ifdef DHD_DEBUG
+/* Device console log buffer state */
 #define CONSOLE_LINE_MAX	192
 #define CONSOLE_BUFFER_MAX	2024
 
 
 typedef struct dhd_console {
-	 uint		count;	
-	 uint		log_addr;		 
-	 hnd_log_t	 log;			 
-	 uint		 bufsize;		 
-	 uint8		 *buf;			 
-	 uint		 last;			 
+	 uint		count;	/* Poll interval msec counter */
+	 uint		log_addr;		 /* Log struct address (fixed) */
+	 hnd_log_t	 log;			 /* Log struct (host copy) */
+	 uint		 bufsize;		 /* Size of log buffer */
+	 uint8		 *buf;			 /* Log buffer (host copy) */
+	 uint		 last;			 /* Last buffer read index */
 } dhd_console_t;
-#endif 
+#endif /* DHD_DEBUG */
 typedef struct ring_sh_info {
 	uint32 ring_mem_addr;
 	uint32 ring_state_w;
@@ -92,51 +95,54 @@ typedef struct ring_sh_info {
 
 typedef struct dhd_bus {
 	dhd_pub_t	*dhd;
-	struct pci_dev  *dev;		
-	dll_t       const_flowring; 
+	struct pci_dev  *dev;		/* pci device handle */
+	dll_t       const_flowring; /* constructed list of tx flowring queues */
 
-	si_t		*sih;			
-	char		*vars;			
-	uint		varsz;			
-	uint32		sbaddr;			
-	sbpcieregs_t	*reg;			
+	si_t		*sih;			/* Handle for SI calls */
+	char		*vars;			/* Variables (from CIS and/or other) */
+	uint		varsz;			/* Size of variables buffer */
+	uint32		sbaddr;			/* Current SB window pointer (-1, invalid) */
+	sbpcieregs_t	*reg;			/* Registers for PCIE core */
 
-	uint		armrev;			
-	uint		ramrev;			
-	uint32		ramsize;		
-	uint32		orig_ramsize;		
-	uint32		srmemsize;		
+	uint		armrev;			/* CPU core revision */
+	uint		ramrev;			/* SOCRAM core revision */
+	uint32		ramsize;		/* Size of RAM in SOCRAM (bytes) */
+	uint32		orig_ramsize;		/* Size of RAM in SOCRAM (bytes) */
+	uint32		srmemsize;		/* Size of SRMEM */
 
-	uint32		bus;			
-	uint32		intstatus;		
-	bool		dpc_sched;		
-	bool		fcstate;		
+	uint32		bus;			/* gSPI or SDIO bus */
+	uint32		intstatus;		/* Intstatus bits (events) pending */
+	bool		dpc_sched;		/* Indicates DPC schedule (intrpt rcvd) */
+	bool		fcstate;		/* State of dongle flow-control */
 
-	uint16		cl_devid;		
-	char		*fw_path;		
-	char		*nv_path;		
-	char		*nvram_params;		
+	uint16		cl_devid;		/* cached devid for dhdsdio_probe_attach() */
+	char		*fw_path;		/* module_param: path to firmware image */
+	char		*nv_path;		/* module_param: path to nvram vars file */
+	char		*nvram_params;		/* user specified nvram params. */
 	int		nvram_params_len;
 
-	struct pktq	txq;			
+	struct pktq	txq;			/* Queue length used for flow-control */
 
-	uint		rxlen;			
+	uint		rxlen;			/* Length of valid data in buffer */
 
 
-	bool		intr;			
-	bool		ipend;			
-	bool		intdis;			
-	uint		intrcount;		
-	uint		lastintrs;		
+	bool		intr;			/* Use interrupts */
+	bool		ipend;			/* Device interrupt is pending */
+	bool		intdis;			/* Interrupts disabled by isr */
+	uint		intrcount;		/* Count of device interrupt callbacks */
+	uint		lastintrs;		/* Count as of last watchdog timer */
 
 #ifdef DHD_DEBUG
-	dhd_console_t	console;		
-	uint		console_addr;		
-#endif 
+	dhd_console_t	console;		/* Console output polling support */
+	uint		console_addr;		/* Console address from shared struct */
+#endif /* DHD_DEBUG */
 
-	bool		alp_only;		
+	bool		alp_only;		/* Don't use HT clock (ALP only) */
 
-	bool		remap;		
+	bool		remap;		/* Contiguous 1MB RAM: 512K socram + 512K devram
+					 * Available with socram rev 16
+					 * Remap region not DMA-able
+					 */
 	uint32		resetinstr;
 	uint32		dongle_ram_base;
 
@@ -145,15 +151,15 @@ typedef struct dhd_bus {
 	bool bus_flowctrl;
 	ioctl_comp_resp_msg_t	ioct_resp;
 	uint32		dma_rxoffset;
-	volatile char	*regs;		
-	volatile char	*tcm;		
+	volatile char	*regs;		/* pci device memory va */
+	volatile char	*tcm;		/* pci device memory va */
 	uint32		tcm_size;
 #ifdef CONFIG_ARCH_MSM8994
 	uint32		bar1_win_base;
 	uint32		bar1_win_mask;
 #endif
 	osl_t		*osh;
-	uint32		nvram_csm;	
+	uint32		nvram_csm;	/* Nvram checksum */
 	uint16		pollrate;
 	uint16  polltick;
 
@@ -161,7 +167,7 @@ typedef struct dhd_bus {
 	void    *pcie_mb_intr_osh;
 	bool	sleep_allowed;
 
-	
+	/* version 3 shared struct related info start */
 	ring_sh_info_t	ring_sh[BCMPCIE_COMMON_MSGRINGS + MAX_DHD_TX_FLOWS];
 	uint8	h2d_ring_count;
 	uint8	d2h_ring_count;
@@ -172,7 +178,7 @@ typedef struct dhd_bus {
 
 	uint32 h2d_mb_data_ptr_addr;
 	uint32 d2h_mb_data_ptr_addr;
-	
+	/* version 3 shared struct related info end */
 
 	uint32 def_intmask;
 	bool	ltrsleep_on_unload;
@@ -185,32 +191,33 @@ typedef struct dhd_bus {
 #ifdef CONFIG_ARCH_MSM
 	struct msm_pcie_register_event pcie_event;
 	bool islinkdown;
-#endif 
-#endif 
+#endif /* CONFIG_ARCH_MSM */
+#endif /* SUPPORT_LINKDOWN_RECOVERY */
 #ifdef PCIE_TX_DEFERRAL
 	struct workqueue_struct *tx_wq;
 	struct work_struct create_flow_work;
 	struct work_struct delete_flow_work;
 	unsigned long *delete_flow_map;
 	struct sk_buff_head orphan_list;
-#endif 
+#endif /* PCIE_TX_DEFERRAL */
 #ifdef DHD_USE_IDLECOUNT
-	int32 idlecount;		
-	int32 idletime;			
+	int32 idlecount;		/* Activity timeout counter */
+	int32 idletime;			/* Control for activity timeout */
 #ifdef DHD_USE_IDLEACTIVE
-	int32 idleclock;		
-#endif 
-	int32 bus_wake;			
-	atomic_t runtime_suspend;		
-	bool host_suspend;		
-	struct mutex pm_lock;		
-	wait_queue_head_t rpm_queue; 
-#endif 
+	int32 idleclock;		/* How to set bus driver when idle */
+#endif /* DHD_USE_IDLEACTIVE */
+	int32 bus_wake;			/* For wake up the bus */
+	atomic_t runtime_suspend;		/* For check runtime suspend end */
+	bool host_suspend;		/* For checking host is suspended */
+	struct mutex pm_lock;		/* Synchronize for system PM & runtime PM */
+	wait_queue_head_t rpm_queue; /* wait-queue for bus wake up */
+#endif /* DHD_USE_IDLECOUNT */
 	uint32 d0_inform_cnt;
 	uint32 d0_inform_in_use_cnt;
 	uint8 force_suspend;
 } dhd_bus_t;
 
+/* function declarations */
 
 extern uint32* dhdpcie_bus_reg_map(osl_t *osh, ulong addr, int size);
 extern int dhdpcie_bus_register(void);
@@ -230,7 +237,7 @@ extern int dhdpcie_bus_suspend(struct  dhd_bus *bus, bool state);
 extern int dhdpcie_pci_suspend_resume(struct dhd_bus *bus, bool state);
 #ifndef BCMPCIE_OOB_HOST_WAKE
 extern void dhdpcie_pme_active(osl_t *osh, bool enable);
-#endif 
+#endif /* !BCMPCIE_OOB_HOST_WAKE */
 extern int dhdpcie_start_host_pcieclock(dhd_bus_t *bus);
 extern int dhdpcie_stop_host_pcieclock(dhd_bus_t *bus);
 extern int dhdpcie_disable_device(dhd_bus_t *bus);
@@ -244,7 +251,11 @@ extern void dhdpcie_unreg_pcie_notify(void);
 extern int dhdpcie_oob_intr_register(dhd_bus_t *bus);
 extern void dhdpcie_oob_intr_unregister(dhd_bus_t *bus);
 extern void dhdpcie_oob_intr_set(dhd_bus_t *bus, bool enable);
-#endif 
+#endif /* BCMPCIE_OOB_HOST_WAKE */
+
+#ifdef SUPPORT_LINKDOWN_RECOVERY
+extern void dhdpcie_link_recovery(dhd_bus_t *bus);
+#endif /* SUPPORT_LINKDOWN_RECOVERY */
 
 extern int dhd_buzzz_dump_dngl(dhd_bus_t *bus);
-#endif 
+#endif /* dhd_pcie_h */

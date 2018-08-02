@@ -1266,13 +1266,14 @@ static struct clk_lookup cpu_clocks_8994_v2[] = {
 };
 
 #if defined(CONFIG_HTC_DEBUG_FOOTPRINT)
+/* get effective cpu idx by clk */
 int clk_get_cpu_idx(struct clk *c)
 {
-	
+	/* cpu0 ~ cpu3 are little cluster. */
 	if (c == &a53_hf_mux.c || c == &a53_hf_mux_v2.c || c == &a53_clk.c)
 		return 0;
 
-	
+	/* cpu4 ~ cpu7 are big cluster. */
 	if (c == &a57_hf_mux.c || c == &a57_hf_mux_v2.c || c == &a57_clk.c)
 		return 4;
 

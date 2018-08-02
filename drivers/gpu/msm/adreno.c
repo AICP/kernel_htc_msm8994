@@ -2379,11 +2379,16 @@ bool adreno_hw_isidle(struct adreno_device *adreno_dev)
 	if (reg_rbbm_status & ADRENO_RBBM_STATUS_BUSY_MASK)
 		return false;
 
+	/*
+	 * Make sure that sptp is power collapsed otherwise there is
+	 * possibility of sptp sending interrupts which means its not
+	 * safe to consider gpu not busy
+	 */
 	if (gpudev->is_sptp_idle)
 		if (!gpudev->is_sptp_idle(adreno_dev))
 			return false;
 
-	
+	/* Don't consider ourselves idle if there is an IRQ pending */
 	if (adreno_irq_pending(adreno_dev))
 		return false;
 
@@ -2621,7 +2626,7 @@ static void adreno_read(struct kgsl_device *device, void *base,
 	if (!in_interrupt()) {
 		kgsl_pre_hwaccess(device);
 	} else {
-		
+		/* make sure clocks are on */
 		if (device->state == KGSL_STATE_NAP) {
 			struct kgsl_pwrctrl *pwr = &device->pwrctrl;
 			int i;

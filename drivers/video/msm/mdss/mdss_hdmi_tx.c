@@ -720,8 +720,7 @@ static ssize_t hdmi_tx_sysfs_wta_hpd(struct device *dev,
 		return rc;
 	}
 
-	if (hdmi_ctrl->ds_registered && hpd &&
-	    (!hdmi_ctrl->mhl_hpd_on || hdmi_ctrl->hpd_feature_on))
+	if (hpd && (!hdmi_ctrl->mhl_hpd_on || hdmi_ctrl->hpd_feature_on))
 		return 0;
 
 	switch (hpd) {

@@ -259,12 +259,17 @@ struct buffer_info *get_registered_buf(struct msm_vidc_inst *inst,
 	list_for_each_entry(temp, &inst->registeredbufs.list, list) {
 		for (i = 0; (i < temp->num_planes)
 			&& (i < VIDEO_MAX_PLANES); i++) {
-			bool ion_hndl_matches = temp->handle[i] ?
-						msm_smem_compare_buffers(inst->mem_client, fd,
-						temp->handle[i]->smem_priv) : false;
+			int8_t ion_hndl_matches =
+				msm_smem_compare_buffers(inst->mem_client, fd,
+				temp->handle[i]->smem_priv);
+			/* HTC_VIDEO_START : Add error handling for check Ion handle */
+			if (ion_hndl_matches < 0) {
+				dprintk(VIDC_ERR, "Ion handle for fd %d doesn't exist!!\n", fd);
+				return NULL;
+			}
+			/* HTC_VIDEO_END */
 			if (temp &&
-				(ion_hndl_matches ||
-				(device_addr == temp->device_addr[i])) &&
+				(device_addr == temp->device_addr[i] || ion_hndl_matches) &&
 				(CONTAINS(temp->buff_off[i],
 				temp->size[i], buff_off)
 				|| CONTAINS(buff_off,
@@ -340,7 +345,7 @@ struct buffer_info *device_to_uvaddr(struct msm_vidc_list *buf_list,
 
 	mutex_lock(&buf_list->lock);
 	list_for_each_entry(temp, &buf_list->list, list) {
-		
+		/* HTC_START: Fix NULL pointer dereferenced issue */
 		if (temp) {
 			for (i = 0; (i < temp->num_planes)
 				&& (i < VIDEO_MAX_PLANES); i++) {
@@ -356,7 +361,7 @@ struct buffer_info *device_to_uvaddr(struct msm_vidc_list *buf_list,
 			dprintk(VIDC_ERR,
 				"Get NULL buffer_info!\n");
 		}
-		
+		/* HTC_END */
 		if (found)
 			break;
 	}
@@ -558,13 +563,21 @@ int map_and_register_buf(struct msm_vidc_inst *inst, struct v4l2_buffer *b)
 			binfo->handle[i] = same_fd_handle;
 		} else {
 			if (inst->map_output_buffer) {
+                               /* HTC_START: ION debug mechanism enhancement
+                                * The alphabet after Alloc_/Import_/Free_ represents for different meaning.
+                                * I: Input buffer
+                                * O: Output buffer
+                                * S: Scratch buffer
+                                * V: Venus hfi buffer
+                                * U: Unknown buffer
+                                */
 #if 1
                                 dprintk(VIDC_WARN,
                                         "[Vidc_Mem][%p] Import_%s: UsrAddr(%lx) FD(%d)\n",
                                         inst, ((get_hal_buffer_type(inst, b) == HAL_BUFFER_INPUT)? "I":"O"),
                                         binfo->uvaddr[i], b->m.planes[i].reserved[0]);
 #endif
-                                
+                                /* HTC_END */
 				binfo->handle[i] =
 					map_buffer(inst, &b->m.planes[i],
 						get_hal_buffer_type(inst, b));
@@ -1335,9 +1348,12 @@ void *msm_vidc_open(int core_id, int session_type)
 		goto fail_mem_client;
 	}
 
+        /* HTC_START: ION debug mechanism enhancement
+         * Add the additional video instance inside struct smem_client
+         */
         smem_client = inst->mem_client;
         smem_client->inst = inst;
-        
+        /* HTC_END */
 
 	if (session_type == MSM_VIDC_DECODER) {
 		msm_vdec_inst_init(inst);

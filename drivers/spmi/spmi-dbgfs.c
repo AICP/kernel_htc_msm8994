@@ -747,6 +747,12 @@ static struct qpnp_voltage_range nldo1_ranges[] = {
         VOLTAGE_RANGE(2,  750000,  750000, 1537500, 12500),
 };
 
+/*
+static struct qpnp_voltage_range nldo2_ranges[] = {
+        VOLTAGE_RANGE(1,  375000,  375000,  768750,  6250),
+        VOLTAGE_RANGE(2,  750000,  775000, 1537500, 12500),
+};
+*/
 
 static struct qpnp_voltage_range nldo3_ranges[] = {
         VOLTAGE_RANGE(0,  375000,  375000, 1537500, 12500),
@@ -970,9 +976,9 @@ static int htc_vreg_is_enabled(struct _qpnp_vregs *qpnp_vregs, struct _vreg *vre
         }
 
         if (val & (1 << qpnp_vregs->en_bit))
-                rc = 1; 
+                rc = 1; /* Enable */
         else
-                rc = 0; 
+                rc = 0; /* Disable */
 
         return rc;
 }
@@ -989,9 +995,9 @@ static int htc_vreg_is_pulldown(struct _qpnp_vregs *qpnp_vregs, struct _vreg *vr
         }
 
         if (val & (1 << qpnp_vregs->pd_bit))
-                rc = 1; 
+                rc = 1; /* Pull down */
         else
-                rc = 0; 
+                rc = 0; /* Doesn't pull down */
 
         return rc;
 }
@@ -1018,6 +1024,10 @@ static int htc_vreg_ldo_get_voltage(struct _qpnp_vregs *qpnp_vregs, struct _vreg
         u32 vmin = 0;
         int ret = 0;
 
+        /*
+         * Select range, step & vmin based on input voltage & type of LDO
+         * LDO can operate in low, mid, high power mode
+         */
         ret= spmi_read_data(qpnp_vregs->ctrl, &range, vreg->base_addr + qpnp_vregs->range_ctl_offset, 1);
         if (ret < 0) {
                 pr_err("SPMI read failed, err = %d\n", ret);
@@ -1048,7 +1058,7 @@ static int htc_vreg_ldo_get_voltage(struct _qpnp_vregs *qpnp_vregs, struct _vreg
                 }
         } else {
                 pr_err("%s: vreg type = %d, range = %d, not support\n", __func__, range, vreg->type);
-                
+                // FIXME: Remove hard code
                 if (range == 0) {
                         step = 120000;
                         vmin = 1380000;
@@ -1151,7 +1161,7 @@ static int htc_vreg_ult_smps_get_voltage(struct _qpnp_vregs *qpnp_vregs, struct 
        u32 vmin = 0;
        int ret = 0;
 
-       
+       /* Read subtype control for ULT SMPS */
        ret = spmi_read_data(qpnp_vregs->ctrl, &subtype, vreg->base_addr + qpnp_vregs->subtype_ctl_offset, 1);
        if (ret < 0) {
                pr_err("SPMI read failed, err = %d\n", ret);
@@ -1164,6 +1174,13 @@ static int htc_vreg_ult_smps_get_voltage(struct _qpnp_vregs *qpnp_vregs, struct 
                return -1;
        }
 
+       /*
+        * For subtype 0D, 0E and 0F: Vout (mV) = 375 + Vset*12.5 for
+        * (0000000~1011111, 7 bit); Vout (mV) = 750 + Vset*25 for
+        * (1100000~1111111, last 5 bit);
+        * For subtype 10: Vout (mV) = 1550 + Vset*25 for (000000~111111,
+        * 6bit), the MSB is ignored.
+       */
        if (subtype == 0xd || subtype == 0xe || subtype == 0xf) {
                if (voltage > 0x5f) {
                        vmin = 750000;
@@ -1204,10 +1221,10 @@ static int htc_vreg_ldo_set_voltage(struct _qpnp_vregs *qpnp_vregs, struct _vreg
 	uint8_t range_sel, voltage_sel;
 	int range_sel_flag, range_id = 0;
 
-	
+	/* Set the range select as default */
 	range_sel_flag = -1;
 
-	
+	/* Determine "Range Value" based different LDO type */
 	if (vreg->type == VREG_TYPE_PLDO) {
 		for (i = 0; i < ARRAY_SIZE(pldo_ranges); i++) {
 			if ((pldo_ranges[i].min_uV < val)
@@ -1229,16 +1246,16 @@ static int htc_vreg_ldo_set_voltage(struct _qpnp_vregs *qpnp_vregs, struct _vreg
 			}
 		}
 	} else {
-		
+		// TODO
 	}
 
-	
+	/* if range_sel is negative, means that not valid range be selected */
 	if (range_sel_flag<0) {
 		pr_err("Can't set voltage due to not range can be seleted\n");
 		return -1;
 	}
 
-	
+	/* Caculate Vstep, Voltage = Vmin + VSET*(Vstep) */
 	if (vreg->type == VREG_TYPE_PLDO) {
 		voltage_sel = (val - pldo_ranges[range_id].min_uV)
 			/ pldo_ranges[range_id].step_uV;
@@ -1246,10 +1263,10 @@ static int htc_vreg_ldo_set_voltage(struct _qpnp_vregs *qpnp_vregs, struct _vreg
 		voltage_sel = (val - nldo1_ranges[range_id].min_uV)
 			/ nldo1_ranges[range_id].step_uV;
 	} else {
-		
+		// TODO
 	}
 
-	
+	/* Perform the SPMI write(s) to VOLTAGE_CTL1 for range select */
 	ret = spmi_write_data(qpnp_vregs->ctrl, &range_sel,
 		vreg->base_addr + qpnp_vregs->range_ctl_offset, 1);
 
@@ -1258,7 +1275,7 @@ static int htc_vreg_ldo_set_voltage(struct _qpnp_vregs *qpnp_vregs, struct _vreg
 		return ret;
 	}
 
-	
+	/* Perform the SPMI write(s) to VOLTAGE_CTL2 for step choice */
 	ret = spmi_write_data(qpnp_vregs->ctrl, &voltage_sel,
 		vreg->base_addr + qpnp_vregs->step_ctl_offset, 1);
 
@@ -1276,10 +1293,10 @@ static int htc_vreg_ult_ldo_set_voltage(struct _qpnp_vregs *qpnp_vregs, struct _
        uint8_t range_sel, voltage_sel;
        int range_sel_flag, range_id = 0;
 
-       
+       /* Set the range select as default */
        range_sel_flag = -1;
 
-       
+       /* Determine "Range Value" based different LDO type */
        if (vreg->type == VREG_TYPE_ULT_NLDO) {
                for (i = 0; i < ARRAY_SIZE(ult_nldo_ranges); i++) {
                        if ((ult_nldo_ranges[i].min_uV < val)
@@ -1302,13 +1319,13 @@ static int htc_vreg_ult_ldo_set_voltage(struct _qpnp_vregs *qpnp_vregs, struct _
                }
        }
 
-       
+       /* if range_sel is negative, means that not valid range be selected */
        if (range_sel_flag < 0) {
                pr_err("Can't set voltage due to not range can be seleted\n");
                return -1;
        }
 
-       
+       /* Caculate Vstep, Voltage = Vmin + VSET*(Vstep) */
        if (vreg->type == VREG_TYPE_ULT_NLDO) {
                voltage_sel = (val - ult_nldo_ranges[range_id].min_uV)
                        / ult_nldo_ranges[0].step_uV;
@@ -1317,7 +1334,7 @@ static int htc_vreg_ult_ldo_set_voltage(struct _qpnp_vregs *qpnp_vregs, struct _
                        / ult_pldo_ranges[0].step_uV;
        }
 
-       
+       /* Perform the SPMI write(s) to VOLTAGE_CTL2 for step choice */
        ret = spmi_write_data(qpnp_vregs->ctrl, &voltage_sel,
                vreg->base_addr + qpnp_vregs->step_ctl_offset, 1);
 
@@ -1335,7 +1352,7 @@ static int htc_vreg_smps_set_voltage(struct _qpnp_vregs *qpnp_vregs, struct _vre
 	uint8_t range_sel, voltage_sel;
 	int range_sel_flag, range_id = 0;
 
-	
+	/* Set the range select as default */
 	range_sel_flag = -1;
 
 	if (vreg->type == VREG_TYPE_HF_SMPS) {
@@ -1359,13 +1376,13 @@ static int htc_vreg_smps_set_voltage(struct _qpnp_vregs *qpnp_vregs, struct _vre
 			}
 		}
 #else
-		
+		/* To avoid voltage drop, always read MV_RANGE first by default and keep to use it to change voltage */
 		ret = spmi_read_data(qpnp_vregs->ctrl, &range_sel, vreg->base_addr + qpnp_vregs->range_ctl_offset, 1);
 		if (ret) {
 			pr_err("SPMI read failed, err = %zu\n", (size_t)ret);
 			return ret;
 		}
-		
+		/* Find the range id for array index */
 		if (vreg->type == VREG_TYPE_FT2P5_SMPS) {
 			for (i = 0; i < ARRAY_SIZE(ftsmps2p5_ranges); i++) {
 				if (ftsmps2p5_ranges[i].range_sel == range_sel) {
@@ -1386,16 +1403,16 @@ static int htc_vreg_smps_set_voltage(struct _qpnp_vregs *qpnp_vregs, struct _vre
 		}
 #endif
 	} else {
-		
+		//TODO
 	}
 
-	
+	/* if range_sel is negative, means that not valid range be selected */
 	if (range_sel_flag<0) {
 		pr_err("Can't set voltage due to not range can be seleted\n");
 		return -1;
 	}
 
-	
+	/* Caculate Vstep, Voltage = Vmin + VSET*(Vstep) */
 	if (vreg->type == VREG_TYPE_HF_SMPS) {
 		voltage_sel = (val - smps_ranges[range_id].min_uV)
 			/ smps_ranges[range_id].step_uV;
@@ -1406,10 +1423,10 @@ static int htc_vreg_smps_set_voltage(struct _qpnp_vregs *qpnp_vregs, struct _vre
                 voltage_sel = (val - ftsmps2p5_ranges[range_id].min_uV)
                         / ftsmps2p5_ranges[range_id].step_uV;
 	} else {
-		
+		// TODO
 	}
 
-	
+	/* Perform the SPMI write(s) to VOLTAGE_CTL1 for range select */
 	ret = spmi_write_data(qpnp_vregs->ctrl, &range_sel,
 		vreg->base_addr + qpnp_vregs->range_ctl_offset, 1);
 
@@ -1418,7 +1435,7 @@ static int htc_vreg_smps_set_voltage(struct _qpnp_vregs *qpnp_vregs, struct _vre
 		return ret;
 	}
 
-	
+	/* Perform the SPMI write(s) to VOLTAGE_CTL2 for step choice */
 	ret = spmi_write_data(qpnp_vregs->ctrl, &voltage_sel,
 		vreg->base_addr + qpnp_vregs->step_ctl_offset, 1);
 
@@ -1437,7 +1454,7 @@ static int htc_vreg_ult_smps_set_voltage(struct _qpnp_vregs *qpnp_vregs, struct 
        int range_sel_flag, range_id = 0;
        voltage_sel=0;
 
-       
+       /* Set the range select as default */
        range_sel_flag = -1;
 
        if (vreg->type == VREG_TYPE_ULT_LO_SMPS) {
@@ -1462,13 +1479,13 @@ static int htc_vreg_ult_smps_set_voltage(struct _qpnp_vregs *qpnp_vregs, struct 
                }
        }
 
-       
+       /* if range_sel is negative, means that not valid range be selected */
        if (range_sel_flag < 0) {
                pr_err("Can't set voltage due to not range can be seleted\n");
                return -1;
        }
 
-       
+       /* Caculate Vstep, Voltage = Vmin + VSET*(Vstep) */
        if (vreg->type == VREG_TYPE_ULT_LO_SMPS) {
                voltage_sel = (val - ult_lo_smps_ranges[range_id].min_uV)
                        / ult_lo_smps_ranges[range_id].step_uV;
@@ -1476,11 +1493,11 @@ static int htc_vreg_ult_smps_set_voltage(struct _qpnp_vregs *qpnp_vregs, struct 
                voltage_sel = (val - ult_ho_smps_ranges[range_id].min_uV)
                        / ult_ho_smps_ranges[range_id].step_uV;
 
-               
+               /* voltage_sel is a 6 bit value and the MSB is ignored */
                voltage_sel |= 0x20;
        }
 
-       
+       /* Perform the SPMI write(s) to VOLTAGE_CTL2 for step choice */
        ret = spmi_write_data(qpnp_vregs->ctrl, &voltage_sel,
                vreg->base_addr + qpnp_vregs->step_ctl_offset, 1);
 
@@ -1542,7 +1559,7 @@ int htc_vreg_dump(int vreg_id, struct seq_file *m, char *vreg_buffer, int curr_l
 
 	vreg = &qpnp_vregs.vregs[vreg_id];
 
-        
+        /* Get vreg name */
         memset(name_buf, 0, VREG_NAME_VOL_LEN);
         len = strlen(vreg->name);
         if (len >= VREG_NAME_VOL_LEN)
@@ -1550,7 +1567,7 @@ int htc_vreg_dump(int vreg_id, struct seq_file *m, char *vreg_buffer, int curr_l
         memcpy(name_buf, vreg->name, len);
         name_buf[len] = '\0';
 
-        
+        /* Does vreg enable? */
         memset(en_buf, 0, VREG_EN_PD_MODE_LEN);
         enable = htc_vreg_is_enabled(&qpnp_vregs, vreg);
         if (enable < 0)
@@ -1560,9 +1577,16 @@ int htc_vreg_dump(int vreg_id, struct seq_file *m, char *vreg_buffer, int curr_l
         else
                 sprintf(en_buf, "NO  ");
 
-        
+        /* Get vreg mode*/
         memset(mode_buf, 0, VREG_EN_PD_MODE_LEN);
         mode = htc_vreg_get_mode(&qpnp_vregs, vreg);
+        /*
+             *  H: Force NPM/ Force PWM
+             *  A: Auto Mode
+             *  B: Bypass Mode
+             *  W: PMIC Awake (Sleep_B)
+             *  U: Unused
+            */
         if (vreg->type < 4) {
                 mode_buf[0] = mode & 0x80 ? 'H' : '_';
                 mode_buf[1] = mode & 0x40 ? 'A' : '_';
@@ -1600,7 +1624,7 @@ int htc_vreg_dump(int vreg_id, struct seq_file *m, char *vreg_buffer, int curr_l
                 mode_buf[3] = 'U';
         }
 
-        
+        /* Does vreg pull down? */
         memset(pd_buf, 0, VREG_EN_PD_MODE_LEN);
         pd = htc_vreg_is_pulldown(&qpnp_vregs, vreg);
         if (pd < 0)
@@ -1610,7 +1634,7 @@ int htc_vreg_dump(int vreg_id, struct seq_file *m, char *vreg_buffer, int curr_l
         else
                 sprintf(pd_buf, "NO  ");
 
-        
+        /* Get vreg voltage */
         memset(vol_buf, 0, VREG_NAME_VOL_LEN);
         vol = htc_vreg_get_voltage(&qpnp_vregs, vreg);
         if (vol < 0)
@@ -1840,7 +1864,7 @@ static int htc_vreg_dump_probe(struct platform_device *pdev)
 		pr_err("%s: Fail to get pull down bit offset\n", __func__);
 
 	htc_vreg_dump_debugfs_init();
-	
+	/* If device is S-OFF, create htc_voltage file node. */
 	if (get_tamper_sf() == 0)
 		htc_voltage_debugfs_init();
 	return 0;

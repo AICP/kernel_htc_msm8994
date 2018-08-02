@@ -17,6 +17,7 @@
 #include <linux/module.h>
 #include <linux/proc_fs.h>
 #include <asm/uaccess.h>
+//#include <mach/board.h>
 #include <linux/seq_file.h>
 
 #include <linux/slab.h>
@@ -45,6 +46,12 @@ static char htc_debug_flag[FLAG_LEN+1]={0};
 extern int get_partition_num_by_name(char *name);
 static int offset=2676;
 static int first_read=1;
+/**
+MTK  LK  MISC_ENABLE_LOG_OFFSET :: 148084  = 147456 + 628
+QCT  LK  MISC_ENABLE_LOG_OFFSET ::   2676  =  2048  + 628
+QCT  HB  MISC_ENABLE_LOG_OFFSET ::    628  =     0  + 628
+
+**/
 
 static int htc_debug_read(struct seq_file *m, void *v)
 {
@@ -76,7 +83,7 @@ static int htc_debug_read(struct seq_file *m, void *v)
         nread = kernel_read(filp, filp->f_pos, RfMisc, FLAG_LEN+2);
 
         memset(htc_debug_flag,0,FLAG_LEN+1);
-        memcpy(htc_debug_flag,RfMisc+2,FLAG_LEN);
+        memcpy(htc_debug_flag,RfMisc+2,FLAG_LEN);//RfMisc will have two bytes prefix "0x"
 
         SECMSG("%s: RfMisc        :%s (%zd)\n", __func__,RfMisc, nread);
         SECMSG("%s: htc_debug_flag:%s \n", __func__, htc_debug_flag);
@@ -104,8 +111,9 @@ static ssize_t htc_debug_write(struct file *file, const char __user *buffer,
 
     SECMSG("%s called (count:%d)\n", __func__, (int)count);
 
-    if (count != sizeof(buf)){
-        printk(KERN_ERR"count != sizeof(buf)\n");
+    if ((count != FLAG_LEN + 2) && (count != FLAG_LEN + 3)) {
+        // +2 for prefix "0x", +3 for prefix "0x" and suffix "\0" or "\n"
+        printk(KERN_ERR"unexpected size of flag\n");
         return -EFAULT;
     }
 
@@ -113,7 +121,7 @@ static ssize_t htc_debug_write(struct file *file, const char __user *buffer,
         return -EFAULT;
 
     memset(htc_debug_flag,0,FLAG_LEN+1);
-    memcpy(htc_debug_flag,buf+2,FLAG_LEN);
+    memcpy(htc_debug_flag,buf+2,FLAG_LEN);//buf will have two bytes prefix "0x"
 
     SECMSG("Receive :%s\n",buf);
     SECMSG("Flag    :%s\n",htc_debug_flag);
@@ -135,7 +143,7 @@ static ssize_t htc_debug_write(struct file *file, const char __user *buffer,
 
     SECMSG("%s: offset :%d\n", __func__, offset);
     filp->f_pos = offset;
-    nread = kernel_write(filp, buf, FLAG_LEN+2, filp->f_pos);
+    nread = kernel_write(filp, buf, FLAG_LEN+2, filp->f_pos);//Need to write two bytes prefix "0x" to misc
     SECMSG("%s:wrire buf: %s (%zd)\n", __func__, buf, nread);
 
     if (filp)
@@ -170,7 +178,7 @@ static void init_from_device_tree(void)
 
     data = (char *) of_get_property(misc_node, ENABLE_LOG_PROPERTY, &property_size);
     pr_info("%s - length: %d\n", __func__, property_size);
-    if(property_size < FLAG_LEN)
+    if(!data || property_size < FLAG_LEN)
         return;
 
     pr_info("%s - loglevel: %s\n", __func__, data);
@@ -178,7 +186,7 @@ static void init_from_device_tree(void)
     memset(htc_debug_flag, 0, (FLAG_LEN + 1));
     memcpy(htc_debug_flag, data, FLAG_LEN);
 
-    
+    //clear first_read to prevent from reading eMMC
     first_read = 0;
 }
 
@@ -190,7 +198,7 @@ static int __init sysinfo_proc_init(void)
 
     init_from_device_tree();
 
-    
+    /* NOTE: kernel 3.10 use proc_create_data to create /proc file node */
     entry = proc_create_data(PROCNAME, 0660, NULL, &htc_debug_fops, NULL);
     if (entry == NULL) {
         printk(KERN_ERR "%s: unable to create /proc%s entry\n", __func__,PROCNAME);
