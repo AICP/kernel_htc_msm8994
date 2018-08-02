@@ -754,6 +754,7 @@ static int sst_compr_get_metadata(struct snd_compr_stream *cstream,
 	return ret;
 }
 
+//htc audio ++ (Implement SRS Effect in DSP)
 static int soc_compr_config_effect(struct snd_compr_stream *cstream, void *data, void *payload)
 {
     struct snd_soc_pcm_runtime *rtd = cstream->private_data;
@@ -763,7 +764,9 @@ static int soc_compr_config_effect(struct snd_compr_stream *cstream, void *data,
        ret = platform->driver->compr_ops->config_effect(cstream, data, payload);
    return ret;
 }
+//htc auduio --
 
+/* ASoC Compress operations */
 static struct snd_compr_ops soc_compr_ops = {
 	.open			= soc_compr_open,
 	.free			= soc_compr_free,
@@ -777,7 +780,7 @@ static struct snd_compr_ops soc_compr_ops = {
 	.ack			= soc_compr_ack,
 	.get_caps		= soc_compr_get_caps,
 	.get_codec_caps		= soc_compr_get_codec_caps,
-	.config_effect		= soc_compr_config_effect 
+	.config_effect		= soc_compr_config_effect //htc audio
 };
 
 /* ASoC Dynamic Compress operations */
@@ -794,7 +797,7 @@ static struct snd_compr_ops soc_compr_dyn_ops = {
 	.ack			= soc_compr_ack,
 	.get_caps		= soc_compr_get_caps,
 	.get_codec_caps		= soc_compr_get_codec_caps,
-	.config_effect		= soc_compr_config_effect 
+	.config_effect		= soc_compr_config_effect //htc audio
 };
 
 /* create a new compress */

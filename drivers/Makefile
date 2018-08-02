@@ -162,6 +162,7 @@ obj-$(CONFIG_ANDROID)		+= android/
 
 #MobiCore
 obj-$(CONFIG_MOBICORE_SUPPORT)  += gud/
+obj-$(CONFIG_TRUSTONIC_TEE)     += gud/
 
 obj-$(CONFIG_CORESIGHT)		+= coresight/
 obj-$(CONFIG_ESOC)		+= esoc/
@@ -173,7 +174,7 @@ obj-$(CONFIG_SENSORS_SSC)	+= sensors/
 obj-y += htc_sdservice/
 
 #HTC Debug
-obj-y		+= htc_debug/
+obj-$(CONFIG_HTC_DEBUG)		+= htc_debug/
 
 obj-$(CONFIG_HTC_DEBUG_FOOTPRINT)	+= htc_mnemosyne/
 obj-$(CONFIG_HTC_POWER_DEBUG)		+= htc_power_debug/

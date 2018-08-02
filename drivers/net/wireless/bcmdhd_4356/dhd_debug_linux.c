@@ -118,7 +118,7 @@ dbg_ring_poll_worker(struct work_struct *work)
 	hdr = (dhd_dbg_ring_entry_t *)buf;
 	while (rlen > 0) {
 		ring_status.read_bytes += ENTRY_LENGTH(hdr);
-		
+		/* offset fw ts to host ts */
 		hdr->timestamp += ring_info->tsoffset;
 		debug_data_send(dhdp, ringid, hdr, ENTRY_LENGTH(hdr),
 				ring_status);
@@ -133,7 +133,7 @@ dbg_ring_poll_worker(struct work_struct *work)
 
 exit:
 	if (ring_info->interval) {
-		
+		/* retrigger the work at same interval */
 		if (ring_status.written_bytes == ring_status.read_bytes)
 			schedule_delayed_work(d_work, ring_info->interval);
 		else
@@ -179,7 +179,7 @@ dhd_os_start_logging(dhd_pub_t *dhdp, char *ring_name, int log_level,
 	DHD_DBGIF(("%s , log_level : %d, time_intval : %d, threshod %d Bytes\n",
 		__FUNCTION__, log_level, time_intval, threshold));
 
-	
+	/* change the configuration */
 	ret = dhd_dbg_set_configuration(dhdp, ring_id, log_level, flags, threshold);
 	if (ret) {
 		DHD_ERROR(("dhd_set_configuration is failed : %d\n", ret));
@@ -221,17 +221,17 @@ dhd_os_reset_logging(dhd_pub_t *dhdp)
 	if (!os_priv)
 		return BCME_ERROR;
 
-	
+	/* Stop all rings */
 	for (ring_id = DEBUG_RING_ID_INVALID + 1; ring_id < DEBUG_RING_ID_MAX; ring_id++) {
 		DHD_DBGIF(("%s: Stop ring buffer %d\n", __FUNCTION__, ring_id));
 
 		ring_info = &os_priv[ring_id];
-		
+		/* cancel any pending work */
 		cancel_delayed_work_sync(&ring_info->work);
-		
+		/* log level zero makes stop logging on that ring */
 		ring_info->log_level = 0;
 		ring_info->interval = 0;
-		
+		/* change the configuration */
 		ret = dhd_dbg_set_configuration(dhdp, ring_id, 0, 0, 0);
 		if (ret) {
 			DHD_ERROR(("dhd_set_configuration is failed : %d\n", ret));
@@ -257,7 +257,7 @@ dhd_os_suppress_logging(dhd_pub_t *dhdp, bool suppress)
 	max_log_level = MAX(os_priv[FW_VERBOSE_RING_ID].log_level,
 		os_priv[FW_EVENT_RING_ID].log_level);
 	if (max_log_level == SUPPRESS_LOG_LEVEL) {
-		
+		/* suppress the logging in FW not to wake up host while device in suspend mode */
 		ret = dhd_iovar(dhdp, 0, "logtrace", (char *)&enable, sizeof(enable), 1);
 		if (ret < 0 && (ret != BCME_UNSUPPORTED)) {
 			DHD_ERROR(("logtrace is failed : %d\n", ret));
@@ -318,11 +318,11 @@ dhd_os_push_push_ring_data(dhd_pub_t *dhdp, int ring_id, void *data, int32 data_
 		msg_hdr.flags |= DBG_RING_ENTRY_FLAGS_HAS_TIMESTAMP;
 		msg_hdr.flags |= DBG_RING_ENTRY_FLAGS_HAS_BINARY;
 		msg_hdr.timestamp = local_clock();
-		
+		/* convert to ms */
 		do_div(msg_hdr.timestamp, 1000000);
 		msg_hdr.len = sizeof(event_data);
 		event_data.event = *((uint16 *)(data));
-		
+		/* filter the event for higher log level with current log level */
 		for (i = 0; i < ARRAYSIZE(dhd_event_map); i++) {
 			if ((dhd_event_map[i].tag == event_data.event) &&
 				dhd_event_map[i].log_level > ring_info->log_level) {
@@ -372,7 +372,7 @@ dhd_os_dbg_attach(dhd_pub_t *dhdp)
 	linux_dbgring_info_t *os_priv, *ring_info;
 	int ring_id;
 
-	
+	/* os_dbg data */
 	os_priv = MALLOCZ(dhdp->osh, sizeof(*os_priv) * DEBUG_RING_ID_MAX);
 	if (!os_priv)
 		return BCME_NOMEM;
@@ -397,9 +397,9 @@ dhd_os_dbg_detach(dhd_pub_t *dhdp)
 {
 	linux_dbgring_info_t *os_priv, *ring_info;
 	int ring_id;
-	
+	/* free os_dbg data */
 	os_priv = dhd_dbg_get_priv(dhdp);
-	
+	/* abort pending any job */
 	for (ring_id = DEBUG_RING_ID_INVALID + 1; ring_id < DEBUG_RING_ID_MAX; ring_id++) {
 		ring_info = &os_priv[ring_id];
 		if (ring_info->interval) {

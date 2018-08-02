@@ -45,11 +45,12 @@ typedef struct {
 #define BCMPCIE_PUSH_TX_RING	1
 #else
 #define BCMPCIE_PUSH_TX_RING	0
-#endif 
+#endif /* BCMPCIE_SUPPORT_TX_PUSH_RING */
 
+/* May be overridden by 43xxxxx-roml.mk */
 #if !defined(BCMPCIE_MAX_TX_FLOWS)
 #define BCMPCIE_MAX_TX_FLOWS	40
-#endif 
+#endif /* ! BCMPCIE_MAX_TX_FLOWS */
 
 #define PCIE_SHARED_VERSION		0x00005
 #define PCIE_SHARED_VERSION_MASK	0x000FF
@@ -63,6 +64,7 @@ typedef struct {
 #define PCIE_SHARED_EVT_SEQNUM		0x08000
 #define PCIE_SHARED_DMA_INDEX		0x10000
 
+/* D2H M2M DMA Complete Sync mechanism: Modulo-253-SeqNum or XORCSUM */
 #define PCIE_SHARED_D2H_SYNC_SEQNUM		0x20000
 #define PCIE_SHARED_D2H_SYNC_XORCSUM		0x40000
 #define PCIE_SHARED_D2H_SYNC_MODE_MASK \
@@ -75,6 +77,7 @@ typedef struct {
 #define BCMPCIE_D2H_MSGRING_RX_COMPLETE			4
 #define BCMPCIE_COMMON_MSGRING_MAX_ID			4
 
+/* Added only for single tx ring */
 #define BCMPCIE_H2D_TXFLOWRINGID			5
 
 #define BCMPCIE_H2D_COMMON_MSGRINGS			2
@@ -115,15 +118,15 @@ typedef struct ring_state {
 
 
 typedef struct ring_info {
-	
-	uint32		ringmem_ptr;	
+	/* locations in the TCM where the ringmem is and ringstate are defined */
+	uint32		ringmem_ptr;	/* ring mem location in TCM */
 	uint32		h2d_w_idx_ptr;
 
 	uint32		h2d_r_idx_ptr;
 	uint32		d2h_w_idx_ptr;
 
 	uint32		d2h_r_idx_ptr;
-	
+	/* host locations where the DMA of read/write indices are */
 	sh_addr_t	h2d_w_idx_hostaddr;
 	sh_addr_t	h2d_r_idx_hostaddr;
 	sh_addr_t	d2h_w_idx_hostaddr;
@@ -133,53 +136,55 @@ typedef struct ring_info {
 } ring_info_t;
 
 typedef struct {
-	
+	/* shared area version captured at flags 7:0 */
 	uint32	flags;
 
 	uint32  trap_addr;
 	uint32  assert_exp_addr;
 	uint32  assert_file_addr;
 	uint32  assert_line;
-	uint32	console_addr;		
+	uint32	console_addr;		/* Address of hnd_cons_t */
 
 	uint32  msgtrace_addr;
 
 	uint32  fwid;
 
-	
+	/* Used for debug/flow control */
 	uint16  total_lfrag_pkt_cnt;
-	uint16  max_host_rxbufs; 
+	uint16  max_host_rxbufs; /* rsvd in spec */
 
-	uint32 dma_rxoffset; 
+	uint32 dma_rxoffset; /* rsvd in spec */
 
-	
+	/* these will be used for sleep request/ack, d3 req/ack */
 	uint32  h2d_mb_data_ptr;
 	uint32  d2h_mb_data_ptr;
 
-	
-	
+	/* information pertinent to host IPC/msgbuf channels */
+	/* location in the TCM memory which has the ring_info */
 	uint32	rings_info_ptr;
 
-	
+	/* block of host memory for the scratch buffer */
 	uint32		host_dma_scratch_buffer_len;
 	sh_addr_t	host_dma_scratch_buffer;
 
-	
+	/* block of host memory for the dongle to push the status into */
 	uint32		device_rings_stsblk_len;
 	sh_addr_t	device_rings_stsblk;
 #ifdef BCM_BUZZZ
-	uint32	buzzz;	
+	uint32	buzzz;	/* BUZZZ state format strings and trace buffer */
 #endif
 } pciedev_shared_t;
 
 
+/* H2D mail box Data */
 #define H2D_HOST_D3_INFORM	0x00000001
 #define H2D_HOST_DS_ACK		0x00000002
-#define H2D_HOST_CONS_INT	0x80000000	
+#define H2D_HOST_CONS_INT	0x80000000	/* h2d int for console cmds  */
 
 #define H2D_HOST_D0_INFORM_IN_USE	0x00000008
 #define H2D_HOST_D0_INFORM		0x00000010
 
+/* D2H mail box Data */
 #define D2H_DEV_D3_ACK		0x00000001
 #define D2H_DEV_DS_ENTER_REQ	0x00000002
 #define D2H_DEV_DS_EXIT_NOTE	0x00000004
@@ -191,6 +196,7 @@ extern pciedev_shared_t pciedev_shared;
 #define NTXPACTIVE(r, w, d)     (((r) <= (w)) ? ((w)-(r)) : ((d)-(r)+(w)))
 #define NTXPAVAIL(r, w, d)      (((d) - NTXPACTIVE((r), (w), (d))) > 1)
 
+/* Function can be used to notify host of FW halt */
 #define READ_AVAIL_SPACE(w, r, d)		\
 			((w >= r) ? (w - r) : (d - r))
 
@@ -215,4 +221,4 @@ extern pciedev_shared_t pciedev_shared;
 #define CHECK_WRITE_SPACE(r, w, d)	\
 	MIN(WRITE_SPACE_AVAIL(r, w, d), WRITE_SPACE_AVAIL_CONTINUOUS(r, w, d))
 
-#endif	
+#endif	/* _bcmpcie_h_ */

@@ -25,6 +25,7 @@
 #include <linux/posix-timers.h>
 #include <linux/workqueue.h>
 #include <linux/freezer.h>
+#include <linux/workqueue.h>
 #include <linux/module.h>
 
 #define OFFALARM_SIZE    (10)
@@ -182,6 +183,7 @@ static struct rtc_task alarmtimer_rtc_task = {
 };
 
 
+/* offmode-alarm */
 static int find_offmode_alarm(void)
 {
         struct timespec rtc_now;
@@ -230,6 +232,7 @@ static void alarm_shutdown(struct platform_device *pdev)
                 rtc_set_alarm(rtcdev, &rtc_alarm);
         }
 }
+/* offmode-alarm */
 
 /**
  * alarmtimer_get_rtcdev - Return selected rtcdevice

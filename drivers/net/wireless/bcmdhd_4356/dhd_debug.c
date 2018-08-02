@@ -111,6 +111,7 @@ struct map_table event_tag_map[] = {
 	{TRACE_TAG_RATE_MBPS, WIFI_TAG_RATE_MBPS, "RATE"},
 };
 
+/* define log level per ring type */
 struct log_level_table fw_verbose_level_map[] = {
 	{1, EVENT_LOG_TAG_PCI_ERROR, "PCI_ERROR"},
 	{1, EVENT_LOG_TAG_PCI_WARN, "PCI_WARN"},
@@ -153,40 +154,41 @@ struct map_table nan_evt_tag_map[] = {
 	{TRACE_TAG_ADDR, WIFI_TAG_ADDR, "ADDR_0"},
 };
 
+/* reference tab table */
 uint ref_tag_tbl[EVENT_LOG_TAG_MAX + 1] = {0};
 
 enum dbg_ring_state {
-	RING_STOP	= 0,	
-	RING_ACTIVE,	
-	RING_SUSPEND	
+	RING_STOP	= 0,	/* ring is not initialized */
+	RING_ACTIVE,	/* ring is live and logging */
+	RING_SUSPEND	/* ring is initialized but not logging */
 };
 
 struct ring_statistics {
 	/* number of bytes that was written to the buffer by driver */
 	uint32 written_bytes;
-	
+	/* number of bytes that was read from the buffer by user land */
 	uint32 read_bytes;
 	/* number of records that was written to the buffer by driver */
 	uint32 written_records;
 };
 
 typedef struct dhd_dbg_ring {
-	int	id;		
-	uint8	name[DBGRING_NAME_MAX];	
-	uint32	ring_size;	
-	uint32	wp;		
-	uint32	rp;		
-	uint32  log_level; 
-	uint32	threshold; 
-	void *	ring_buf;	
-	void *	lock;		
-	struct ring_statistics stat; 
-	enum dbg_ring_state state;	
+	int	id;		/* ring id */
+	uint8	name[DBGRING_NAME_MAX];	/* name string */
+	uint32	ring_size;	/* numbers of item in ring */
+	uint32	wp;		/* write pointer */
+	uint32	rp;		/* read pointer */
+	uint32  log_level; /* log_level */
+	uint32	threshold; /* threshold bytes */
+	void *	ring_buf;	/* pointer of actually ring buffer */
+	void *	lock;		/* spin lock for ring access */
+	struct ring_statistics stat; /* statistics */
+	enum dbg_ring_state state;	/* ring state enum */
 } dhd_dbg_ring_t;
 
 typedef struct dhd_dbg {
 	dhd_dbg_ring_t dbg_rings[DEBUG_RING_ID_MAX];
-	void *private;		
+	void *private;		/* os private_data */
 	dbg_pullreq_t pullreq;
 	dbg_urgent_noti_t urgent_notifier;
 } dhd_dbg_t;
@@ -202,12 +204,18 @@ typedef struct dhbdbg_pending_item {
 	dhd_dbg_ring_entry_t *ring_entry;
 } pending_item_t;
 
+/* get next entry; offset must point to valid entry */
 static uint32
 next_entry(dhd_dbg_ring_t *ring, int32 offset)
 {
 	dhd_dbg_ring_entry_t *entry =
 		(dhd_dbg_ring_entry_t *)((uint8 *)ring->ring_buf + offset);
 
+	/*
+	 * A length == 0 record is the end of buffer marker. Wrap around and
+	 * read the message at the start of the buffer as *this* one, and
+	 * return the one after that.
+	 */
 	if (!entry->len) {
 		entry = (dhd_dbg_ring_entry_t *)ring->ring_buf;
 		return ENTRY_LENGTH(entry);
@@ -215,12 +223,17 @@ next_entry(dhd_dbg_ring_t *ring, int32 offset)
 	return offset + ENTRY_LENGTH(entry);
 }
 
+/* get record by offset; idx must point to valid entry */
 static dhd_dbg_ring_entry_t *
 get_entry(dhd_dbg_ring_t *ring, int32 offset)
 {
 	dhd_dbg_ring_entry_t *entry =
 		(dhd_dbg_ring_entry_t *)((uint8 *)ring->ring_buf + offset);
 
+	/*
+	 * A length == 0 record is the end of buffer marker. Wrap around and
+	 * read the message at the start of the buffer.
+	 */
 	if (!entry->len)
 		return (dhd_dbg_ring_entry_t *)ring->ring_buf;
 	return entry;
@@ -242,13 +255,13 @@ dhd_dbg_ring_pull(dhd_pub_t *dhdp, int ring_id, void *data, uint32 buf_len)
 
 	flags = dhd_os_spin_lock(ring->lock);
 
-	
+	/* get a fresh pending length */
 	avail_len = READ_AVAIL_SPACE(ring->wp, ring->rp, ring->ring_size);
 	while (avail_len > 0 && buf_len > 0) {
 		hdr = get_entry(ring, ring->rp);
 		memcpy(data, hdr, ENTRY_LENGTH(hdr));
 		r_len += ENTRY_LENGTH(hdr);
-		
+		/* update read pointer */
 		ring->rp = next_entry(ring, ring->rp);
 		data = (uint8 *)data + ENTRY_LENGTH(hdr);
 		avail_len -= ENTRY_LENGTH(hdr);
@@ -280,7 +293,7 @@ dhd_dbg_ring_push(dhd_pub_t *dhdp, int ring_id, dhd_dbg_ring_entry_t *hdr, void 
 	flags = dhd_os_spin_lock(ring->lock);
 
 	w_len = ENTRY_LENGTH(hdr);
-	
+	/* prep the space */
 	do {
 		if (ring->rp == ring->wp)
 			break;
@@ -292,14 +305,14 @@ dhd_dbg_ring_push(dhd_pub_t *dhdp, int ring_id, dhd_dbg_ring_entry_t *hdr, void 
 			} else if (ring->ring_size - ring->wp < w_len) {
 				if (ring->rp == 0)
 					ring->rp = next_entry(ring, ring->rp);
-				
-				
-				
+				/* 0 pad insufficient tail space */
+				/* HTC_WIFI_START */
+				// ** remove original code
 #if 0
 				memset((uint8 *)ring->ring_buf + ring->wp, 0,
 				       DBG_RING_ENTRY_SIZE);
 #endif
-				
+				/* HTC_WIFI_END */
 				ring->wp = 0;
 				continue;
 			} else {
@@ -317,21 +330,21 @@ dhd_dbg_ring_push(dhd_pub_t *dhdp, int ring_id, dhd_dbg_ring_entry_t *hdr, void 
 	} while (1);
 
 	w_entry = (dhd_dbg_ring_entry_t *)((uint8 *)ring->ring_buf + ring->wp);
-	
+	/* header */
 	memcpy(w_entry, hdr, DBG_RING_ENTRY_SIZE);
 	w_entry->len = hdr->len;
-	
+	/* payload */
 	memcpy((char *)w_entry + DBG_RING_ENTRY_SIZE, data, w_entry->len);
-	
+	/* update write pointer */
 	ring->wp += w_len;
-	
+	/* update statistics */
 	ring->stat.written_records++;
 	ring->stat.written_bytes += w_len;
 	dhd_os_spin_unlock(ring->lock, flags);
 	DHD_DBGIF(("%s : written_records %d, written_bytes %d\n", __FUNCTION__,
 		ring->stat.written_records, ring->stat.written_bytes));
 
-	
+	/* if the current pending size is bigger than threshold */
 	if (ring->threshold > 0 &&
 		(READ_AVAIL_SPACE(ring->wp, ring->rp, ring->ring_size) >=
 	    ring->threshold))
@@ -342,7 +355,7 @@ dhd_dbg_ring_push(dhd_pub_t *dhdp, int ring_id, dhd_dbg_ring_entry_t *hdr, void 
 static int
 dhd_dbg_msgtrace_seqchk(uint32 *prev, uint32 cur)
 {
-	
+	/* normal case including wrap around */
 	if ((cur == 0 && *prev == 0xFFFFFFFF) || ((cur - *prev) == 1)) {
 		goto done;
 	} else if (cur == *prev) {
@@ -369,7 +382,7 @@ dhd_dbg_msgtrace_msg_parser(void *event_data)
 	hdr = (msgtrace_hdr_t *)event_data;
 	data = (char *)event_data + MSGTRACE_HDRLEN;
 
-	
+	/* There are 2 bytes available at the end of data */
 	data[ntoh16(hdr->len)] = '\0';
 
 	if (ntoh32(hdr->discarded_bytes) || ntoh32(hdr->discarded_printf)) {
@@ -382,6 +395,10 @@ dhd_dbg_msgtrace_msg_parser(void *event_data)
 	if (dhd_dbg_msgtrace_seqchk(&seqnum_prev, ntoh32(hdr->seqnum)))
 		return;
 
+	/* Display the trace buffer. Advance from
+	 * \n to \n to avoid display big
+	 * printf (issue with Linux printk )
+	 */
 	while (*data != '\0' && (s = strstr(data, "\n")) != NULL) {
 		*s = '\0';
 		DHD_FWLOG(("[FWLOG] %s\n", data));
@@ -406,7 +423,7 @@ event_get_tlv(uint16 id, const char* tlvs, uint tlvs_len)
 		tlv = (tlv_log *) pos;
 		if (tlv->tag == id)
 			return pos;
-		rest = tlv->len % 4; 
+		rest = tlv->len % 4; /* padding values */
 		pos += 4 + tlv->len + rest;
 	}
 	return NULL;
@@ -458,7 +475,7 @@ dhd_dbg_nan_event_handler(dhd_pub_t *dhdp, event_log_hdr_t *hdr, uint32 *data)
 	}
 	if (evt_match) {
 		DHD_DBGIF(("%s : event (%s)\n", __FUNCTION__, nan_event_map[evt_idx].desc));
-		
+		/* payload length for nan event data */
 		evt_payload_len = sizeof(log_nan_event_t) +
 			(hdr->count - 2) * DATA_UNIT_FOR_LOG_CNT;
 		if ((evt_payload = MALLOC(dhdp->osh, evt_payload_len)) == NULL) {
@@ -528,7 +545,7 @@ dhd_dbg_custom_evnt_handler(dhd_pub_t *dhdp, event_log_hdr_t *hdr, uint32 *data)
 
 	BCM_REFERENCE(eabuf);
 	BCM_REFERENCE(chanbuf);
-	
+	/* get a event type and version */
 	wl_log_id.t = *data;
 	if (wl_log_id.version != DIAG_VERSION)
 		return BCME_VERSION;
@@ -544,9 +561,9 @@ dhd_dbg_custom_evnt_handler(dhd_pub_t *dhdp, event_log_hdr_t *hdr, uint32 *data)
 	DHD_DBGIF(("Android Event ver %d, payload %d words, ts %llu\n",
 		(*data >> 16), hdr->count - 1, ts_saved));
 
-	
+	/* Perform endian convertion */
 	for (i = 0; i < hdr->count; i++) {
-		
+		/* *(data + i) = ntoh32(*(data + i)); */
 		DHD_DATA(("%08x ", *(data + i)));
 	}
 	DHD_DATA(("\n"));
@@ -554,7 +571,7 @@ dhd_dbg_custom_evnt_handler(dhd_pub_t *dhdp, event_log_hdr_t *hdr, uint32 *data)
 	msg_hdr.flags |= DBG_RING_ENTRY_FLAGS_HAS_BINARY;
 	msg_hdr.type = DBG_RING_ENTRY_EVENT_TYPE;
 
-	
+	/* convert the data to log_conn_event_t format */
 	for (i = 0; i < ARRAYSIZE(event_map); i++) {
 		if (event_map[i].fw_id == wl_log_id.event) {
 			evt_match = TRUE;
@@ -564,7 +581,7 @@ dhd_dbg_custom_evnt_handler(dhd_pub_t *dhdp, event_log_hdr_t *hdr, uint32 *data)
 	}
 	if (evt_match) {
 		log_level = dhdp->dbg->dbg_rings[FW_EVENT_RING_ID].log_level;
-		
+		/* filter the data based on log_level */
 		for (i = 0; i < ARRAYSIZE(fw_event_level_map); i++) {
 			if ((fw_event_level_map[i].tag == hdr->tag) &&
 				(fw_event_level_map[i].log_level > log_level)) {
@@ -572,7 +589,7 @@ dhd_dbg_custom_evnt_handler(dhd_pub_t *dhdp, event_log_hdr_t *hdr, uint32 *data)
 			}
 		}
 		DHD_DBGIF(("%s : event (%s)\n", __FUNCTION__, event_map[match_idx].desc));
-		
+		/* get the payload length for event data (skip : log header + timestamp) */
 		payload_len = sizeof(log_conn_event_t) + DATA_UNIT_FOR_LOG_CNT * (hdr->count - 2);
 		event_data = MALLOC(dhdp->osh, payload_len);
 		if (!event_data) {
@@ -667,7 +684,7 @@ dhd_dbg_verboselog_handler(dhd_pub_t *dhdp, event_log_hdr_t *hdr,
 
 	BCM_REFERENCE(arg);
 
-	
+	/* Get time stamp if it's updated */
 	ts_hdr = (void *)log_ptr - sizeof(event_log_hdr_t);
 	if (ts_hdr->tag == EVENT_LOG_TAG_TS) {
 		ts_data = (uint32 *)ts_hdr - ts_hdr->count;
@@ -681,22 +698,22 @@ dhd_dbg_verboselog_handler(dhd_pub_t *dhdp, event_log_hdr_t *hdr,
 		if (rom_str_len >= (ROMSTR_SIZE -1))
 			rom_str_len = ROMSTR_SIZE - 1;
 
-		
+		/* copy all ascii data for ROM printf to local string */
 		memcpy(fmtstr_loc_buf, log_ptr, rom_str_len);
-		
+		/* add end of line at last */
 		fmtstr_loc_buf[rom_str_len] = '\0';
 
 		DHD_MSGTRACE_LOG(("EVENT_LOG_ROM[0x%08x]: %s",
 				log_ptr[hdr->count - 1], fmtstr_loc_buf));
 
-		
+		/* Add newline if missing */
 		if (fmtstr_loc_buf[strlen(fmtstr_loc_buf) - 1] != '\n')
 			DHD_MSGTRACE_LOG(("\n"));
 
 		return;
 	}
 
-	
+	/* print the message out in a logprint  */
 	if (!(((raw_event->raw_sstr) || (raw_event->rom_raw_sstr)) &&
 		raw_event->fmts) || hdr->fmt_num == 0xffff) {
 		if (dhdp->dbg) {
@@ -754,7 +771,7 @@ dhd_dbg_verboselog_handler(dhd_pub_t *dhdp, event_log_hdr_t *hdr,
 			if ((raw_event->raw_sstr) &&
 				((log_ptr[count] > raw_event->rodata_start) &&
 				(log_ptr[count] < raw_event->rodata_end))) {
-				
+				/* ram static string */
 				addr = log_ptr[count] - raw_event->rodata_start;
 				str_tmpptr = raw_event->raw_sstr + addr;
 				memcpy(str_buf[count], str_tmpptr,
@@ -766,7 +783,7 @@ dhd_dbg_verboselog_handler(dhd_pub_t *dhdp, event_log_hdr_t *hdr,
 					raw_event->rom_rodata_start) &&
 					(log_ptr[count] <
 					raw_event->rom_rodata_end))) {
-				
+				/* rom static string */
 				addr = log_ptr[count] - raw_event->rom_rodata_start;
 				str_tmpptr = raw_event->rom_raw_sstr + addr;
 				memcpy(str_buf[count], str_tmpptr,
@@ -774,12 +791,17 @@ dhd_dbg_verboselog_handler(dhd_pub_t *dhdp, event_log_hdr_t *hdr,
 				str_buf[count][SIZE_LOC_STR-1] = '\0';
 				arg[count].addr = str_buf[count];
 			} else {
+				/*
+				*  Dynamic string OR
+				* No data for static string.
+				* So store all string's address as string.
+				*/
 				snprintf(str_buf[count], SIZE_LOC_STR,
 					"(s)0x%x", log_ptr[count]);
 				arg[count].addr = str_buf[count];
 			}
 		} else {
-			
+			/* Other than string */
 			arg[count].val = log_ptr[count];
 		}
 	}
@@ -795,7 +817,7 @@ dhd_dbg_verboselog_handler(dhd_pub_t *dhdp, event_log_hdr_t *hdr,
 	DHD_EVENT((fmtstr_loc_buf, arg[0], arg[1], arg[2], arg[3],
 		arg[4], arg[5], arg[6], arg[7], arg[8], arg[9], arg[10],
 		arg[11], arg[12], arg[13], arg[14], arg[15]));
-#endif 
+#endif /* CUSTOMER_HW_ONE */
 
 exit:
 	MFREE(dhdp->osh, str_buf, (MAX_NO_OF_ARG * SIZE_LOC_STR));
@@ -830,23 +852,31 @@ dhd_dbg_msgtrace_log_parser(dhd_pub_t *dhdp, void *event_data,
 	data += 8;
 	datalen -= 8;
 
+	/* start parsing from the tail of packet
+	 * Sameple format of a meessage
+	 * 001d3c54 00000064 00000064 001d3c54 001dba08 035d6ce1 0c540639
+	 * 001d3c54 00000064 00000064 035d6d89 0c580439
+	 * 0x0c580439 -- 39 is tag, 04 is count, 580c is format number
+	 * all these uint32 values comes in reverse order as group as EL data
+	 * while decoding we can only parse from last to first
+	 */
 	dll_init(&list_head);
 	while (datalen > 0) {
 		log_hdr = (event_log_hdr_t *)(data + datalen - hdrlen);
 		/* pratially overwritten entries */
 		if ((uint32 *)log_hdr - (uint32 *)data < log_hdr->count)
 			break;
-		
+		/* Check argument count (only when format is valid) */
 		if ((log_hdr->count > MAX_NO_OF_ARG) &&
 		    (log_hdr->fmt_num != 0xffff))
 			break;
-		
+		/* end of frame? */
 		if (log_hdr->tag == EVENT_LOG_TAG_NULL) {
 			log_hdr--;
 			datalen -= hdrlen;
 			continue;
 		}
-		
+		/* skip 4 bytes time stamp packet */
 		if (log_hdr->tag == EVENT_LOG_TAG_TS) {
 			datalen -= log_hdr->count * 4 + hdrlen;
 			log_hdr -= log_hdr->count + hdrlen / 4;
@@ -871,18 +901,29 @@ dhd_dbg_msgtrace_log_parser(dhd_pub_t *dhdp, void *event_data,
 		dll_delete(cur);
 		MFREE(dhdp->osh, log_item, sizeof(*log_item));
 
+		/* Before DHD debugability is implemented WLC_E_TRACE had been
+		 * used to carry verbose logging from firmware. We need to
+		 * be able to handle those messages even without a initialized
+		 * debug layer.
+		 */
 		if (dhdp->dbg) {
-			
-			
+			/* check the data for NAN event ring; keeping first as small table */
+			/* process only user configured to log */
 			nan_evt_ring_log_level = dhdp->dbg->dbg_rings[NAN_EVENT_RING_ID].log_level;
 			if (dhdp->dbg->dbg_rings[NAN_EVENT_RING_ID].log_level) {
 				for (id = 0; id < ARRAYSIZE(nan_event_level_map); id++) {
 					if (nan_event_level_map[id].tag == log_hdr->tag) {
+						/* dont process if tag log level is greater
+						 * than ring log level
+						 */
 						if (nan_event_level_map[id].log_level >
 							nan_evt_ring_log_level) {
 							msg_processed = TRUE;
 							break;
 						}
+						/* In case of BCME_VERSION error,
+						 * this is not NAN event type data
+						 */
 						if (dhd_dbg_nan_event_handler(dhdp,
 							log_hdr, log_ptr) != BCME_VERSION) {
 							msg_processed = TRUE;
@@ -892,9 +933,12 @@ dhd_dbg_msgtrace_log_parser(dhd_pub_t *dhdp, void *event_data,
 				}
 			}
 			if (!msg_processed) {
-				
+				/* check the data for event ring */
 				for (id = 0; id < ARRAYSIZE(fw_event_level_map); id++) {
 					if (fw_event_level_map[id].tag == log_hdr->tag) {
+						/* In case of BCME_VERSION error,
+						 * this is not event type data
+						 */
 						if (dhd_dbg_custom_evnt_handler(dhdp,
 							log_hdr, log_ptr) != BCME_VERSION) {
 							msg_processed = TRUE;
@@ -909,12 +953,12 @@ dhd_dbg_msgtrace_log_parser(dhd_pub_t *dhdp, void *event_data,
 
 	}
 }
-#else 
+#else /* !SHOW_LOGTRACE */
 static INLINE void dhd_dbg_verboselog_handler(dhd_pub_t *dhdp,
 	event_log_hdr_t *hdr, void *raw_event_ptr) {};
 static INLINE void dhd_dbg_msgtrace_log_parser(dhd_pub_t *dhdp,
 	void *event_data, void *raw_event_ptr, uint datalen) {};
-#endif 
+#endif /* SHOW_LOGTRACE */
 
 void
 dhd_dbg_trace_evnt_handler(dhd_pub_t *dhdp, void *event_data,
@@ -991,6 +1035,9 @@ dhd_dbg_ring_deinit(dhd_pub_t *dhdp, dhd_dbg_ring_t *ring)
 	MFREE(dhdp->osh, buf, ring_sz);
 }
 
+/*
+ * dhd_dbg_set_event_log_tag : modify the state of an event log tag
+ */
 void
 dhd_dbg_set_event_log_tag(dhd_pub_t *dhdp, uint16 tag, uint8 set)
 {
@@ -1056,10 +1103,10 @@ dhd_dbg_set_configuration(dhd_pub_t *dhdp, int ring_id, int log_level, int flags
 
 	for (i = 0; i < array_len; i++) {
 		if (log_level == 0 || (log_level_tbl[i].log_level > log_level)) {
-			
+			/* clear the reference per ring */
 			ref_tag_tbl[log_level_tbl[i].tag] &= ~(1 << ring_id);
 		} else {
-			
+			/* set the reference per ring */
 			ref_tag_tbl[log_level_tbl[i].tag] |= (1 << ring_id);
 		}
 		set = (ref_tag_tbl[log_level_tbl[i].tag])? 1 : 0;
@@ -1070,6 +1117,10 @@ dhd_dbg_set_configuration(dhd_pub_t *dhdp, int ring_id, int log_level, int flags
 	return BCME_OK;
 }
 
+/*
+* dhd_dbg_get_ring_status : get the ring status from the coresponding ring buffer
+* Return: An error code or 0 on success.
+*/
 
 int
 dhd_dbg_get_ring_status(dhd_pub_t *dhdp, int ring_id, dhd_dbg_ring_status_t *dbg_ring_status)
@@ -1099,6 +1150,10 @@ dhd_dbg_get_ring_status(dhd_pub_t *dhdp, int ring_id, dhd_dbg_ring_status_t *dbg
 	return ret;
 }
 
+/*
+* dhd_dbg_find_ring_id : return ring_id based on ring_name
+* Return: An invalid ring id for failure or valid ring id on success.
+*/
 
 int
 dhd_dbg_find_ring_id(dhd_pub_t *dhdp, char *ring_name)
@@ -1119,6 +1174,10 @@ dhd_dbg_find_ring_id(dhd_pub_t *dhdp, char *ring_name)
 	return id;
 }
 
+/*
+* dhd_dbg_get_priv : get the private data of dhd dbugability module
+* Return : An NULL on failure or valid data address
+*/
 void *
 dhd_dbg_get_priv(dhd_pub_t *dhdp)
 {
@@ -1127,6 +1186,10 @@ dhd_dbg_get_priv(dhd_pub_t *dhdp)
 	return dhdp->dbg->private;
 }
 
+/*
+* dhd_dbg_start : start and stop All of Ring buffers
+* Return: An error code or 0 on success.
+*/
 int
 dhd_dbg_start(dhd_pub_t *dhdp, bool start)
 {
@@ -1142,7 +1205,7 @@ dhd_dbg_start(dhd_pub_t *dhdp, bool start)
 		dbg_ring = &dbg->dbg_rings[ring_id];
 		if (!start) {
 			if (VALID_RING(dbg_ring->id)) {
-				
+				/* Initialize the information for the ring */
 				dbg_ring->state = RING_SUSPEND;
 				dbg_ring->log_level = 0;
 				dbg_ring->rp = dbg_ring->wp = 0;
@@ -1155,6 +1218,11 @@ dhd_dbg_start(dhd_pub_t *dhdp, bool start)
 	return ret;
 }
 
+/*
+ * dhd_dbg_send_urgent_evt: send the health check evt to Upper layer
+ *
+ * Return: An error code or 0 on success.
+ */
 
 int
 dhd_dbg_send_urgent_evt(dhd_pub_t *dhdp, const void *data, const uint32 len)
@@ -1170,6 +1238,11 @@ dhd_dbg_send_urgent_evt(dhd_pub_t *dhdp, const void *data, const uint32 len)
 	}
 	return ret;
 }
+/*
+ * dhd_dbg_attach: initialziation of dhd dbugability module
+ *
+ * Return: An error code or 0 on success.
+ */
 int
 dhd_dbg_attach(dhd_pub_t *dhdp, dbg_pullreq_t os_pullreq,
 	dbg_urgent_noti_t os_urgent_notifier, void *os_priv)
@@ -1219,6 +1292,9 @@ error:
 	return ret;
 }
 
+/*
+ * dhd_dbg_detach: clean up dhd dbugability module
+ */
 void
 dhd_dbg_detach(dhd_pub_t *dhdp)
 {

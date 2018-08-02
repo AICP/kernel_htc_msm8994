@@ -30,8 +30,8 @@ struct fdt_user {
 
 struct fdtable {
 	unsigned int max_fds;
-	struct file __rcu **fd;      
-	struct fdt_user *user; 
+	struct file __rcu **fd;      /* current fd array */
+	struct fdt_user *user; /* current installer and previous remover */
 	unsigned long *close_on_exec;
 	unsigned long *open_fds;
 	struct rcu_head rcu;

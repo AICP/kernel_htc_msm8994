@@ -1862,7 +1862,7 @@ static int _wake(struct kgsl_device *device)
 		if (status) {
 			kgsl_pwrctrl_request_state(device, KGSL_STATE_NONE);
 			KGSL_DRV_ERR(device, "start failed %d\n", status);
-			
+			/* Find out the wake-up reason besides PM runtime */
 			dump_stack();
 			break;
 		}

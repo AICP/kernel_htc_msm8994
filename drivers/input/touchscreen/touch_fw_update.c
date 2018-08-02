@@ -94,10 +94,12 @@ static ssize_t debug_show(struct device *dev, struct device_attribute *attr,
 static ssize_t debug_store(struct device *dev, struct device_attribute *attr,
 	const char *buf, size_t count)
 {
-	if (sscanf(buf, "%ix", &debug_mask) != 1) {
+	unsigned long input;
+	if (kstrtoul(buf, 16, &input) != 0) {
 		pr_err("bad parameter");
 		return -EINVAL;
 	}
+	debug_mask = (input & 0xFFFF);
 
 	return count;
 }
