@@ -13,6 +13,8 @@
 #ifndef __HTC_CHARGER_H__
 #define __HTC_CHARGER_H__
 
+/* for cable_detect struct */
+//#include <mach/board.h>
 
 enum htc_charger_event {
 	HTC_CHARGER_EVENT_READY = 0,
@@ -32,24 +34,28 @@ enum htc_charger_event {
 	HTC_CHARGER_EVENT_SRC_UNDER_RATING,
 	HTC_CHARGER_EVENT_SAFETY_TIMEOUT,
 	HTC_CHARGER_EVENT_BATT_UEVENT_CHANGE,
-    HTC_CHARGER_EVENT_SRC_CABLE_INSERT_NOTIFY,
+	HTC_CHARGER_EVENT_SRC_CABLE_INSERT_NOTIFY,
 	HTC_CHARGER_EVENT_SRC_MHL_UNKNOWN,
 	HTC_CHARGER_EVENT_SRC_MHL_100MA,
 	HTC_CHARGER_EVENT_SRC_MHL_500MA,
 	HTC_CHARGER_EVENT_SRC_MHL_900MA,
 	HTC_CHARGER_EVENT_SRC_MHL_1500MA,
 	HTC_CHARGER_EVENT_SRC_MHL_2000MA,
+	HTC_CHARGER_EVENT_SRC_HVDCP,
 };
 
 enum htc_charging_cfg {
-	HTC_CHARGER_CFG_LIMIT = 0,	
+	HTC_CHARGER_CFG_LIMIT = 0,	/* cdma talking */
 	HTC_CHARGER_CFG_SLOW,
 	HTC_CHARGER_CFG_FAST,
+/*	HTC_CHARGER_CFG_9VFAST,
+	HTC_CHARGER_CFG_WARM,
+	HTC_CHARGER_CFG_COOL,*/
 };
 
 enum htc_power_source_type {
-	
-	
+	/* HTC_PWR_SOURCE_TYPE_DRAIN, */
+	/* HTC_PWR_SOURCE_TYPE_UNKNOWN, */
 	HTC_PWR_SOURCE_TYPE_BATT = 0,
 	HTC_PWR_SOURCE_TYPE_USB,
 	HTC_PWR_SOURCE_TYPE_AC,
@@ -100,7 +106,7 @@ enum usb_connect_type {
 	CONNECT_TYPE_INTERNAL,
 	CONNECT_TYPE_UNSUPPORTED,
 #ifdef CONFIG_MACH_VERDI_LTE
-	
+	/* Y cable with USB and 9V charger */
 	CONNECT_TYPE_USB_9V_AC,
 #endif
 	CONNECT_TYPE_MHL_AC,
@@ -110,6 +116,7 @@ enum usb_connect_type {
 	CONNECT_TYPE_MHL_1500MA,
 	CONNECT_TYPE_MHL_2000MA,
 };
+/* START: add USB connected notify function */
 struct t_usb_status_notifier{
 	struct list_head notifier_link;
 	const char *name;
@@ -120,6 +127,9 @@ int64_t htc_qpnp_adc_get_usbid_adc(void);
 int usb_get_connect_type(void);
 static LIST_HEAD(g_lh_usb_notifier_list);
 
+/***********************************
+Direction: cable detect drvier -> battery driver or other
+ ***********************************/
 struct t_cable_status_notifier{
 	struct list_head cable_notifier_link;
 	const char *name;
@@ -182,10 +192,16 @@ struct htc_charger {
 	int (*get_cable_type_by_usb_detect)(int *result);
 	int (*prepare_suspend)(void);
 	int (*complete_resume)(void);
+	int (*get_usb_type)(int *result);
+	int (*get_vbus)(int *result);
+	int (*get_max_iusb)(int *result);
+	int (*get_AICL)(int *result);
 	int (*is_bad_cable_used)(int *result);
+	int (*is_quick_charger_used)(bool *result);
 	int (*set_aicl_deglitch_wa_check)(void);
 };
 
+/* let driver including this .h can notify event to htc battery */
 int htc_charger_event_notify(enum htc_charger_event);
 int usb_type_event_notify(int result);
 

@@ -1728,7 +1728,7 @@ static int htc_mdss_dsi_parse_brt_bl_table(struct device_node *np,
 	if (!data || len % 2) {
 		pr_debug("%s: read %s failed\n", __func__, name);
 	} else {
-		
+		/* Separate the bl and brt table */
 		len /= 2;
 
 		if (brt_bl_table->size || brt_bl_table->brt_data || brt_bl_table->bl_data) {
@@ -1770,7 +1770,7 @@ static int htc_mdss_dsi_parse_nits_table(struct device_node *np,
 		pr_debug("%s: read %s failed\n", __func__, name);
 	} else {
 		len /= sizeof(u32);
-		
+		/* save bl level code */
 		nits_bl_table->data = kzalloc(len * sizeof(u16), GFP_KERNEL);
 		if (!nits_bl_table->data) {
 			pr_err("%s:%d, allocate memory failed %s\n", __func__, __LINE__, name);
@@ -2093,7 +2093,7 @@ static int mdss_panel_parse_dt(struct device_node *np,
 		pr_err("%s: failed to parse panel features\n", __func__);
 		goto error;
 	}
-	
+	/*HTC:ADD*/
 	rc = of_property_read_u32(np, "htc,mdss-skip-first-pinctl", &tmp);
 	pinfo->skip_first_pinctl = (!rc ? tmp : 0);
 
@@ -2143,18 +2143,18 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	rc = of_property_read_u32(np, "htc,mdss-sre-ebi-level", &tmp);
 	ctrl_pdata->sre_ebi_value = (!rc ? tmp : 0);
 
-	
+	/* Suported brightness transfer for Backlight 1.0*/
 	pinfo->brt_bl_table.size = 0;
 	htc_mdss_dsi_parse_brt_bl_table(np, pinfo, "htc,brt-bl-table");
 
-	
+	/* Suported nits tansfer for Backlight 2.0*/
 	pinfo->nits_bl_table.size = 0;
 	pinfo->nits_bl_table.scale = 0;
 	pinfo->nits_bl_table.max_nits = 0;
 	htc_mdss_dsi_parse_nits_table(np, pinfo,
 		"htc,nits-bl-table", "htc,nits-bl-table-scale");
 
-	
+	/*HTC:ADD End*/
 
 	mdss_dsi_parse_panel_horizintal_line_idle(np, ctrl_pdata);
 

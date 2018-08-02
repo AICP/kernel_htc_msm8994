@@ -66,7 +66,7 @@ static void dump_snoc_process(struct work_struct *work)
 	struct scm_desc desc = {0};
 
 	desc.arginfo = SCM_ARGS(2);
-	desc.args[0] = cmd.config = 0xA;	 
+	desc.args[0] = cmd.config = 0xA;	 //0xA is an magic number to notify TZ to dump SNOC syndrome register
 	desc.args[1] = cmd.spare = 0;
 
 	if (!is_scm_armv8())
@@ -332,6 +332,19 @@ static int pil_subsys_init(struct modem_data *drv,
 	}
 
 #if defined(CONFIG_HTC_FEATURES_SSR)
+	/*modem restart condition and ramdump rule would follow below
+	1. Modem restart default enable
+	- flag [6] 0,   [8] 0 -> enable restart, no ramdump
+	- flag [6] 800, [8] 0 -> reboot
+	- flag [6] 800, [8] 8 -> disable restart, go DL mode
+	- flag [6] 0,   [8] 8 -> enable restart, online ramdump
+	2. Modem restart default disable
+	- flag [6] 0,   [8] 0 -> reboot
+	- flag [6] 800, [8] 0 -> enable restart, no ramdump
+	- flag [6] 800, [8] 8 -> enable restart, online ramdump
+	- flag [6] 0,   [8] 8 -> disable restart, go DL mode
+	3. Always disable Modem SSR if boot_mode != normal
+	*/
 #if defined(CONFIG_HTC_FEATURES_SSR_MODEM_ENABLE)
 	if (get_kernel_flag() & (KERNEL_FLAG_ENABLE_SSR_MODEM)) {
 		pr_info("%s: CONFIG_HTC_FEATURES_SSR_MODEM_ENABLE, KERNEL_FLAG_ENABLE_SSR_MODEM, RESET_SOC.\n", __func__);
@@ -503,7 +516,7 @@ static int pil_mss_driver_probe(struct platform_device *pdev)
 			return ret;
 	}
 
-	
+	/* Create workqueue for SNOC dump */
 	dump_snoc_wq = create_singlethread_workqueue("dump_snoc_work");
 
 	init_completion(&drv->stop_ack);

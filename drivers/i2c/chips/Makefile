@@ -10,11 +10,13 @@
 # * I/O expander drivers go to drivers/gpio
 #
 #proximity-objs := cm3629.o
+ifneq (htc_aca, $(findstring htc_aca, $(TARGET_PRODUCT)))
 obj-$(CONFIG_AMP_TFA9895)       += tfa9895.o
 obj-$(CONFIG_AMP_TFA9895L)      += tfa9895l.o
 obj-$(CONFIG_AMP_RT5501)	+= rt5501.o
 obj-$(CONFIG_AMP_RT5501_EVM)	+= rt5501_evm.o
 obj-$(CONFIG_AMP_RT5506)	+= rt5506.o
+endif
 
 ifeq ($(CONFIG_INPUT_CAPELLA_CM3629),y)
 proximity-objs := cm3629.o
@@ -47,11 +49,15 @@ endif
 
 
 #NFC ++
-ifneq ($(PRIVATE_RCMS_NAME),B3_UHL_L50_SENSE70)
+ifeq (htc_b3uhl, $(findstring htc_b3uhl, $(TARGET_PRODUCT)))
+obj-$(CONFIG_SENSORS_NFC_CXD224X) += cxd224x-i2c.o
+EXTRA_CFLAGS += -DCONFIG_SENSOR_LATCH_RESET
+else ifeq (htc_aca, $(findstring htc_aca, $(TARGET_PRODUCT)))
+obj-$(CONFIG_SENSORS_NFC_PN544) += pn548.o
+obj-$(CONFIG_SENSORS_NFC_PN544) += pn548_htc.o
+else
 obj-$(CONFIG_SENSORS_NFC_PN544) += pn544.o
 obj-$(CONFIG_SENSORS_NFC_PN544) += pn544_htc.o
-else
-obj-$(CONFIG_SENSORS_NFC_CXD224X) += cxd224x-i2c.o
 endif
 
 ifneq ($(wildcard $(KBUILD_SRC)/../mfg/.patched),)

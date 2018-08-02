@@ -42,6 +42,6 @@ struct msm_rpm_master_stats_platform_data {
 
 
 #ifdef CONFIG_HTC_POWER_DEBUG
-void msm_rpm_dump_stat(void);
+void msm_rpm_dump_stat(bool print_embedded);
 int htc_get_xo_vddmin_info(uint32_t *xo_count, uint64_t *xo_time, uint32_t *vddmin_count, uint64_t *vddmin_time);
 #endif

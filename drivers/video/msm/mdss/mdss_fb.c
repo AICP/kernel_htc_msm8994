@@ -249,7 +249,7 @@ static enum led_brightness mdss_fb_get_bl_brightness(struct led_classdev *led_cd
 	struct msm_fb_data_type *mfd = dev_get_drvdata(led_cdev->dev->parent);
 	int brt_lvl = mfd->bl_level;
 
-	brt_lvl = htc_backlight_transfer_bl_brightness(brt_lvl, mfd->panel_info, false);
+	brt_lvl = htc_backlight_transfer_bl_brightness(brt_lvl, mfd, false);
 	if (brt_lvl < 0) {
 		MDSS_BRIGHT_TO_BL(brt_lvl, mfd->bl_level, MDSS_MAX_BL_BRIGHTNESS,
 							mfd->panel_info->bl_max);
@@ -287,8 +287,10 @@ static void mdss_fb_set_bl_brightness(struct led_classdev *led_cdev,
 
 	/* This maps android backlight level 0 to 255 into
 	   driver backlight level 0 to bl_max with rounding */
-	bl_lvl = htc_backlight_transfer_bl_brightness(value, mfd->panel_info, true);
+	bl_lvl = htc_backlight_transfer_bl_brightness(value, mfd, true);
 	if (bl_lvl < 0) {
+		/* This maps android backlight level 0 to 255 into
+		   driver backlight level 0 to bl_max with rounding */
 		MDSS_BRIGHT_TO_BL(bl_lvl, value, mfd->panel_info->bl_max,
 							MDSS_MAX_BL_BRIGHTNESS);
 	}
@@ -1072,11 +1074,11 @@ static int mdss_fb_probe(struct platform_device *pdev)
 		else
 			lcd_backlight_registered = 1;
 
-		
+		/*HTC: extend attrs*/
 		htc_register_attrs(&backlight_led.dev->kobj, mfd);
 		htc_debugfs_init(mfd);
 
-		
+		/* htc supports lcd-backlight-nits */
 		backlight_led_nits.max_brightness  = mfd->panel_info->nits_bl_table.max_nits;
 
 		if (led_classdev_register(&pdev->dev, &backlight_led_nits))
@@ -1877,7 +1879,7 @@ int mdss_fb_alloc_fb_ion_memory(struct msm_fb_data_type *mfd, size_t fb_size)
 	if (IS_ERR_OR_NULL(mfd->fb_ion_handle)) {
 		pr_warn("unable to alloc fbmem from ion FB heap- %ld\n",
 				PTR_ERR(mfd->fb_ion_handle));
-		
+		/* fall back to system heap in this special case */
 		mfd->fb_ion_handle = ion_alloc(mfd->fb_ion_client, fb_size, SZ_4K,
 			ION_HEAP(ION_SYSTEM_HEAP_ID), 0);
 		if (IS_ERR_OR_NULL(mfd->fb_ion_handle)) {
@@ -2373,7 +2375,7 @@ static int mdss_fb_register(struct msm_fb_data_type *mfd)
 	var->yres_virtual = panel_info->yres * mfd->fb_page;
 	var->bits_per_pixel = bpp * 8;	/* FrameBuffer color depth */
 
-	
+	/* HTC: register camera brightness */
 	if (panel_info->camera_blk || panel_info->camera_dua_blk) {
 		htc_register_camera_bkl(panel_info->camera_blk, panel_info->camera_dua_blk);
 	}
@@ -3258,9 +3260,10 @@ skip_commit:
 	if (!ret) {
 		if (mfd->panel_info->pdest == DISPLAY_1) {
 			bool skip_cabc_check = false;
-			skip_cabc_check = htc_set_sre(mfd);	
-			htc_set_cabc(mfd, skip_cabc_check);	
-			htc_set_limit_brightness(mfd);		
+			skip_cabc_check = htc_set_sre(mfd);	/* HTC: set sre mode start */
+			htc_set_cabc(mfd, skip_cabc_check);	/* HTC: set cabc mode start */
+			htc_set_limit_brightness(mfd);		/* HTC: set limit brightness level */
+			htc_update_bl_cali_data(mfd);  		/* HTC: set brightness calibration value */
 		}
 		mdss_fb_update_backlight(mfd);
 	}
@@ -4134,6 +4137,8 @@ int mdss_fb_do_ioctl(struct fb_info *info, unsigned int cmd,
 		ret = mdss_fb_mode_switch(mfd, dsi_mode);
 		break;
 
+	/* HTC: We wish to implement dedicated usb fb device in future.
+	 *      However, keep things simple now. */
 	case MSMFB_USBFB_INIT:
 		ret = minifb_ioctl_handler(MINIFB_INIT, argp);
 		break;

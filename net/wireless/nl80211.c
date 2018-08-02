@@ -404,9 +404,9 @@ static const struct nla_policy nl80211_policy[NL80211_ATTR_MAX+1] = {
 				   .len = NL80211_KEY_LEN_PTK_KCK },
 	[NL80211_ATTR_PTK_KEK] = { .type = NLA_BINARY,
 				   .len = NL80211_KEY_LEN_PTK_KEK },
-    
+    /* HTC_WIFI_START */
     [NL80211_ATTR_IFACE_SOCKET_OWNER] = { .type = NLA_FLAG },
-    
+    /* HTC_WIFI_END */
 };
 
 /* policy for the key attributes */
@@ -2536,13 +2536,16 @@ static int nl80211_new_interface(struct sk_buff *skb, struct genl_info *info)
 	int err;
 	enum nl80211_iftype type = NL80211_IFTYPE_UNSPECIFIED;
 	u32 flags;
+/* HTC_WIFI_START */
+//check wdev value
 	struct cfg80211_registered_device *rdev_debug;
 	struct wireless_dev *wdev_debug;
+/* HTC_WIFI_END */
 
-    
-    
+    /* HTC_WIFI_START */
+    /* to avoid failing a new interface creation due to pending removal */
     cfg80211_destroy_ifaces(rdev);
-    
+    /* HTC_WIFI_END */
 
 	memset(&params, 0, sizeof(params));
 
@@ -2588,11 +2591,14 @@ static int nl80211_new_interface(struct sk_buff *skb, struct genl_info *info)
 		return PTR_ERR(wdev);
 	}
 
+/* HTC_WIFI_START */
+//check wdev value
 	printk("add wdev %p in nl80211_new_interface\n",wdev);
-    
+/* HTC_WIFI_END */
+    /* HTC_WIFI_START */
     if (info->attrs[NL80211_ATTR_IFACE_SOCKET_OWNER])
         wdev->owner_nlportid = info->snd_portid;
-    
+    /* HTC_WIFI_END */
 
 	switch (type) {
 	case NL80211_IFTYPE_MESH_POINT:
@@ -2623,6 +2629,8 @@ static int nl80211_new_interface(struct sk_buff *skb, struct genl_info *info)
 		list_add_rcu(&wdev->list, &rdev->wdev_list);
 		rdev->devlist_generation++;
 		mutex_unlock(&rdev->devlist_mtx);
+/* HTC_WIFI_START */
+//check wdev value
 		rcu_read_lock();
 		list_for_each_entry_rcu(rdev_debug, &cfg80211_rdev_list, list) {
 			list_for_each_entry_rcu(wdev_debug, &rdev_debug->wdev_list, list) {
@@ -2630,6 +2638,7 @@ static int nl80211_new_interface(struct sk_buff *skb, struct genl_info *info)
 			}
 		}
 		rcu_read_unlock();
+/* HTC_WIFI_END */
 		break;
 	default:
 		break;
@@ -6154,12 +6163,16 @@ static int nl80211_dump_survey(struct sk_buff *skb,
 static bool nl80211_valid_wpa_versions(u32 wpa_versions)
 {
 	return !(wpa_versions & ~(NL80211_WPA_VERSION_1 |
+/* HTC_WIFI_START */
+// ** remove original code
 #if 0
 				  NL80211_WPA_VERSION_2));
 #endif
+// ** add new code
 				NL80211_WPA_VERSION_2 |
-				
+				/*WAPI*/
 				NL80211_WAPI_VERSION_1));
+/* HTC_WIFI_END */
 }
 
 static int nl80211_authenticate(struct sk_buff *skb, struct genl_info *info)
@@ -11256,16 +11269,20 @@ static int nl80211_netlink_notify(struct notifier_block * nb,
 	rcu_read_lock();
 
 	list_for_each_entry_rcu(rdev, &cfg80211_rdev_list, list) {
-        
-        
-        
+        /* HTC_WIFI_START */
+        // ** remove original code here
+        /*
+		list_for_each_entry_rcu(wdev, &rdev->wdev_list, list)
+			cfg80211_mlme_unregister_socket(wdev, notify->portid);
+        */
+        // ** add new code here
         bool schedule_destroy_work = false;
         list_for_each_entry_rcu(wdev, &rdev->wdev_list, list) {
             cfg80211_mlme_unregister_socket(wdev, notify->portid);
             if (wdev->owner_nlportid == notify->portid)
                 schedule_destroy_work = true;
         }
-        
+        /* HTC_WIFI_END */
 
 		spin_lock_bh(&rdev->beacon_registrations_lock);
 		list_for_each_entry_safe(reg, tmp, &rdev->beacon_registrations,
@@ -11278,7 +11295,7 @@ static int nl80211_netlink_notify(struct notifier_block * nb,
 		}
 		spin_unlock_bh(&rdev->beacon_registrations_lock);
 
-        
+        /* HTC_WIFI_START */
         if (schedule_destroy_work) {
             struct cfg80211_iface_destroy *destroy;
 
@@ -11291,7 +11308,7 @@ static int nl80211_netlink_notify(struct notifier_block * nb,
                 schedule_work(&rdev->destroy_work);
             }
         }
-        
+        /* HTC_WIFI_END */
 	}
 
 	rcu_read_unlock();
@@ -11458,7 +11475,7 @@ void cfg80211_authorization_event(struct net_device *dev,
 	struct cfg80211_event *ev;
 	unsigned long flags;
 
-	
+	/* Valid only in SME_CONNECTED state */
 	if (wdev->sme_state != CFG80211_SME_CONNECTED)
 		return;
 
@@ -11489,7 +11506,7 @@ void cfg80211_key_mgmt_auth(struct net_device *dev,
 	struct cfg80211_event *ev;
 	unsigned long flags;
 
-	
+	/* Valid only in SME_CONNECTED state */
 	if (wdev->sme_state != CFG80211_SME_CONNECTED)
 		return;
 

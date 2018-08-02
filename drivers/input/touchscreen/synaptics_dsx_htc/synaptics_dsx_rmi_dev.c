@@ -151,7 +151,7 @@ static int rmidev_sysfs_irq_enable(struct synaptics_rmi4_data *rmi4_data,
 		if (rmidev->irq_enabled)
 			return retval;
 
-		
+		/* Clear interrupts first */
 		retval = synaptics_rmi4_reg_read(rmi4_data,
 				rmi4_data->f01_data_base_addr + 1,
 				intr_status,
@@ -374,6 +374,19 @@ static ssize_t rmidev_sysfs_intr_mask_store(struct device *dev,
 	return count;
 }
 
+/*
+ * rmidev_llseek - set register address to access for RMI device
+ *
+ * @filp: pointer to file structure
+ * @off:
+ *	if whence == SEEK_SET,
+ *		off: 16-bit RMI register address
+ *	if whence == SEEK_CUR,
+ *		off: offset from current position
+ *	if whence == SEEK_END,
+ *		off: offset from end position (0xFFFF)
+ * @whence: SEEK_SET, SEEK_CUR, or SEEK_END
+ */
 static loff_t rmidev_llseek(struct file *filp, loff_t off, int whence)
 {
 	loff_t newpos;
@@ -418,6 +431,14 @@ clean_up:
 	return newpos;
 }
 
+/*
+ * rmidev_read: read register data from RMI device
+ *
+ * @filp: pointer to file structure
+ * @buf: pointer to user space buffer
+ * @count: number of bytes to read
+ * @f_pos: starting RMI register address
+ */
 static ssize_t rmidev_read(struct file *filp, char __user *buf,
 		size_t count, loff_t *f_pos)
 {
@@ -456,6 +477,14 @@ clean_up:
 	return retval;
 }
 
+/*
+ * rmidev_write: write register data to RMI device
+ *
+ * @filp: pointer to file structure
+ * @buf: pointer to user space buffer
+ * @count: number of bytes to write
+ * @f_pos: starting RMI register address
+ */
 static ssize_t rmidev_write(struct file *filp, const char __user *buf,
 		size_t count, loff_t *f_pos)
 {

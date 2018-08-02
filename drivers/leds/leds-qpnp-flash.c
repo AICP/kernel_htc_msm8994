@@ -124,6 +124,9 @@
 #define FLASH_SUBTYPE_SINGLE					0x02
 #define FLASH_TIME_OUT						600
 
+/*
+ * ID represents physical LEDs for individual control purpose.
+ */
 enum flash_led_id {
 	FLASH_LED_0 = 0,
 	FLASH_LED_1,
@@ -157,20 +160,24 @@ enum current_ramp_steps {
 	RAMP_STEP_27US,
 };
 
-enum flashlight_brightness_attribute_definition
-{ 
-    FBAD_OFF        = 0,
-    FBAD_TORCH1     = 125, 
-    FBAD_TORCH2     = 126, 
-    FBAD_TORCH      = 127, 
-    FBAD_PREFLASH   = 128, 
-    FBAD_FULL       = 255, 
-};
-
 struct flash_regulator_data {
 	struct regulator	*regs;
 	const char		*reg_name;
 	u32			max_volt_uv;
+};
+
+/*
+ * flashlight_brightness_attribute_definition: the definition of flashlight "brightness" attribute
+ */
+
+enum flashlight_brightness_attribute_definition
+{ /* range: [0, 255] */
+    FBAD_OFF        = 0,
+    FBAD_TORCH1     = 125, /*torch level1 mode, 50mA (led1)+ 100mA(led0)*/
+    FBAD_TORCH2     = 126, /*torch level2 mode, 50mA (led1)+ 150mA(led0)*/
+    FBAD_TORCH      = 127, //torch mode, 50mA (led1)+ 50mA(led0)
+    FBAD_PREFLASH   = 128, /*torch level1 mode, 50mA (led1)+ 100mA(led0)*/
+    FBAD_FULL       = 255, /*750mA (led1)+ 750mA(led0)*/
 };
 
 /*
@@ -179,7 +186,6 @@ struct flash_regulator_data {
 struct flash_node_data {
 	struct spmi_device		*spmi_dev;
 	struct led_classdev		cdev;
-	struct regulator		*boost_regulator;
 	struct work_struct		work;
 	struct flash_regulator_data	*reg_data;
 	u32				boost_voltage_max;
@@ -195,6 +201,9 @@ struct flash_node_data {
 	bool				flash_on;
 };
 
+/*
+ * Flash LED configuration read from device tree
+ */
 struct flash_led_platform_data {
 	u16				ramp_up_step;
 	u16				ramp_dn_step;
@@ -215,6 +224,9 @@ struct flash_led_platform_data {
 	bool				power_detect_en;
 };
 
+/*
+ * Flash LED data structure containing flash LED attributes
+ */
 struct qpnp_flash_led {
 	struct spmi_device		*spmi_dev;
 	struct flash_led_platform_data	*pdata;
@@ -251,6 +263,8 @@ int pmi8994_flashlight_torch2(int, int);
 
 int (*htc_flash_main)(int led1, int led2);
 int (*htc_torch_main)(int led1, int led2);
+
+static int flash_regulator_enable(struct qpnp_flash_led *, struct flash_node_data *, bool);
 
 static int
 qpnp_led_masked_write(struct spmi_device *spmi_dev, u16 addr, u8 mask, u8 val)
@@ -291,6 +305,11 @@ qpnp_flash_led_get_max_avail_current(struct flash_node_data *flash_node,
 				"Failed to query power supply\n");
 		return -EINVAL;
 	}
+	/*
+	* When charging is enabled, enforce this new
+	* enabelment sequence to reduce fuel gauge
+	* resolution reading.
+	*/
 	if (led->charging_enabled) {
 		rc = qpnp_led_masked_write(led->spmi_dev,
 			FLASH_MODULE_ENABLE_CTRL(led->base),
@@ -334,7 +353,7 @@ static ssize_t qpnp_led_strobe_type_store(struct device *dev,
 
 	flash_node = container_of(led_cdev, struct flash_node_data, cdev);
 
-	
+	/* '0' for sw strobe; '1' for hw strobe */
 	if (state == 1)
 		flash_node->trigger |= FLASH_LED_STROBE_TYPE_HW;
 	else
@@ -393,7 +412,7 @@ static ssize_t qpnp_flash_led_current_derate_store(struct device *dev,
 	flash_node = container_of(led_cdev, struct flash_node_data, cdev);
 	led = dev_get_drvdata(&flash_node->spmi_dev->dev);
 
-	
+	/*'0' for disable derate feature; non-zero to enable derate feature */
 	if (val == 0)
 		led->pdata->power_detect_en = false;
 	else
@@ -442,6 +461,10 @@ static struct device_attribute qpnp_flash_led_attrs[] = {
 
 static int qpnp_flash_led_get_thermal_derate_rate(const char *rate)
 {
+	/*
+	 * return 5% derate as default value if user specifies
+	 * a value un-supported
+	 */
 	if (strcmp(rate, "1_PERCENT") == 0)
 		return RATE_1_PERCENT;
 	else if (strcmp(rate, "1P25_PERCENT") == 0)
@@ -458,6 +481,10 @@ static int qpnp_flash_led_get_thermal_derate_rate(const char *rate)
 
 static int qpnp_flash_led_get_ramp_step(const char *step)
 {
+	/*
+	 * return 27 us as default value if user specifies
+	 * a value un-supported
+	 */
 	if (strcmp(step, "0P2_US") == 0)
 		return RAMP_STEP_0P2_US;
 	else if (strcmp(step, "0P4_US") == 0)
@@ -478,6 +505,10 @@ static int qpnp_flash_led_get_ramp_step(const char *step)
 
 static u8 qpnp_flash_led_get_droop_debounce_time(u8 val)
 {
+	/*
+	 * return 10 us as default value if user specifies
+	 * a value un-supported
+	 */
 	switch (val) {
 	case 0:
 		return 0;
@@ -494,6 +525,10 @@ static u8 qpnp_flash_led_get_droop_debounce_time(u8 val)
 
 static u8 qpnp_flash_led_get_startup_dly(u8 val)
 {
+	/*
+	 * return 128 us as default value if user specifies
+	 * a value un-supported
+	 */
 	switch (val) {
 	case 10:
 		return 0;
@@ -590,7 +625,7 @@ static int qpnp_flash_led_module_disable(struct qpnp_flash_led *led,
 		if (led->battery_psy) {
 			psy_prop.intval = false;
 			rc = led->battery_psy->set_property(led->battery_psy,
-						POWER_SUPPLY_PROP_OTG_PULSE_SKIP_ENABLE,	
+						POWER_SUPPLY_PROP_OTG_PULSE_SKIP_ENABLE,	//POWER_SUPPLY_PROP_FLASH_ACTIVE,
 								&psy_prop);
 			if (rc) {
 				dev_err(&led->spmi_dev->dev,
@@ -687,14 +722,8 @@ static int flashlight_turn_off(void)
 
 
 exit_flash_led_work:
-	if (this_led->flash_node->boost_regulator && this_led->flash_node->flash_on) {
-
-		regulator_disable(this_led->flash_node->boost_regulator);
-
-		if (regulator_count_voltages(this_led->flash_node->boost_regulator) > 0)
-			regulator_set_voltage(this_led->flash_node->boost_regulator,
-				0, this_led->flash_node->boost_voltage_max);
-	}
+	if (this_led->flash_node->flash_on && this_led->flash_node->num_regulators > 0)
+		flash_regulator_enable(this_led, this_led->flash_node, false);
 
 	this_led->flash_node->flash_on = false;
 	mutex_unlock(&this_led->flash_led_lock);
@@ -721,25 +750,11 @@ int pmi8994_flashlight_mode2(int mode2, int mode13)
 
 	mutex_lock(&this_led->flash_led_lock);
 
-	if (this_led->flash_node->boost_regulator && !this_led->flash_node->flash_on) {
-		if (regulator_count_voltages(this_led->flash_node->boost_regulator)
-									> 0) {
-			rc = regulator_set_voltage(this_led->flash_node->boost_regulator,
-				this_led->flash_node->boost_voltage_max,
-				this_led->flash_node->boost_voltage_max);
-			if (rc) {
-				dev_err(&this_led->spmi_dev->dev,
-				"boost regulator set voltage failed\n");
-				mutex_unlock(&this_led->flash_led_lock);
-				return -EINVAL;
-			}
-		}
-
-		rc = regulator_enable(this_led->flash_node->boost_regulator);
+	if (!this_led->flash_node->flash_on && this_led->flash_node->num_regulators > 0) {
+		rc = flash_regulator_enable(this_led, this_led->flash_node, true);
 		if (rc) {
-			dev_err(&this_led->spmi_dev->dev,
-				"Boost regulator enablement failed\n");
-			goto error_regulator_enable;
+			mutex_unlock(&this_led->flash_led_lock);
+			return -EINVAL;
 		}
 	}
 
@@ -757,7 +772,7 @@ int pmi8994_flashlight_mode2(int mode2, int mode13)
 
 		psy_prop.intval = true;
 		rc = this_led->battery_psy->set_property(this_led->battery_psy,
-						POWER_SUPPLY_PROP_OTG_PULSE_SKIP_ENABLE,	
+						POWER_SUPPLY_PROP_OTG_PULSE_SKIP_ENABLE,	//POWER_SUPPLY_PROP_FLASH_ACTIVE,
 								&psy_prop);
 		if (rc) {
 			dev_err(&this_led->spmi_dev->dev,
@@ -785,7 +800,7 @@ int pmi8994_flashlight_mode2(int mode2, int mode13)
 			}
 		}
 
-		val = 0x3B;	
+		val = 0x3B;	//600msec
 		rc = qpnp_led_masked_write(this_led->spmi_dev,
 			FLASH_SAFETY_TIMER(this_led->base),
 			FLASH_SAFETY_TIMER_MASK, val);
@@ -866,13 +881,8 @@ int pmi8994_flashlight_mode2(int mode2, int mode13)
 	return 0;
 
 exit_flash_led_work:
-	if (this_led->flash_node->boost_regulator && this_led->flash_node->flash_on) {
-		regulator_disable(this_led->flash_node->boost_regulator);
-error_regulator_enable:
-	if (regulator_count_voltages(this_led->flash_node->boost_regulator) > 0)
-		regulator_set_voltage(this_led->flash_node->boost_regulator,
-			0, this_led->flash_node->boost_voltage_max);
-	}
+	if (this_led->flash_node->flash_on && this_led->flash_node->num_regulators > 0)
+		flash_regulator_enable(this_led, this_led->flash_node, false);
 
 	this_led->flash_node->flash_on = false;
 	mutex_unlock(&this_led->flash_led_lock);
@@ -892,25 +902,11 @@ int pmi8994_flashlight_torch2(int mode2, int mode13)
 
 	mutex_lock(&this_led->flash_led_lock);
 
-	if (this_led->flash_node->boost_regulator && !this_led->flash_node->flash_on) {
-		if (regulator_count_voltages(this_led->flash_node->boost_regulator)
-									> 0) {
-			rc = regulator_set_voltage(this_led->flash_node->boost_regulator,
-				this_led->flash_node->boost_voltage_max,
-				this_led->flash_node->boost_voltage_max);
-			if (rc) {
-				dev_err(&this_led->spmi_dev->dev,
-				"boost regulator set voltage failed\n");
-				mutex_unlock(&this_led->flash_led_lock);
-				return -EINVAL;
-			}
-		}
-
-		rc = regulator_enable(this_led->flash_node->boost_regulator);
+	if (!this_led->flash_node->flash_on && this_led->flash_node->num_regulators > 0) {
+		rc = flash_regulator_enable(this_led, this_led->flash_node, true);
 		if (rc) {
-			dev_err(&this_led->spmi_dev->dev,
-				"Boost regulator enablement failed\n");
-			goto error_regulator_enable;
+			mutex_unlock(&this_led->flash_led_lock);
+			return -EINVAL;
 		}
 	}
 
@@ -1000,14 +996,8 @@ int pmi8994_flashlight_torch2(int mode2, int mode13)
 	return 0;
 
 exit_flash_led_work:
-	if (this_led->flash_node->boost_regulator && this_led->flash_node->flash_on) {
-		regulator_disable(this_led->flash_node->boost_regulator);
-error_regulator_enable:
-	if (regulator_count_voltages(this_led->flash_node->boost_regulator) > 0)
-		regulator_set_voltage(this_led->flash_node->boost_regulator,
-			0, this_led->flash_node->boost_voltage_max);
-	}
-
+	if (this_led->flash_node->flash_on && this_led->flash_node->num_regulators > 0)
+		flash_regulator_enable(this_led, this_led->flash_node, false);
 
 	this_led->flash_node->flash_on = false;
 	mutex_unlock(&this_led->flash_led_lock);
@@ -1181,8 +1171,8 @@ static void qpnp_flash_led_work(struct work_struct *work)
 	}
 
 	if (flash_node->type == DUAL_LEDS) {
-		if (flash_node->prgm_current == FBAD_FULL) {
-			val = 0x17;	
+		if (flash_node->prgm_current == FBAD_FULL) {//Flash mode
+			val = 0x17;	//240msec
 			rc = qpnp_led_masked_write(led->spmi_dev,
 				FLASH_SAFETY_TIMER(led->base),
 				FLASH_SAFETY_TIMER_MASK, val);
@@ -1201,7 +1191,7 @@ static void qpnp_flash_led_work(struct work_struct *work)
 				goto exit_flash_led_work;
 			}
 
-			val = 0x3B; 
+			val = 0x3B; //750mA
 			rc = qpnp_led_masked_write(led->spmi_dev,
 					FLASH_LED0_CURRENT(led->base),
 					FLASH_CURRENT_MASK, val);
@@ -1245,7 +1235,7 @@ static void qpnp_flash_led_work(struct work_struct *work)
 				goto exit_flash_led_work;
 			}
 
-		} else {	
+		} else {	//torch mode
 
 			rc = qpnp_led_masked_write(led->spmi_dev,
 				FLASH_LED_UNLOCK_SECURE(led->base),
@@ -1287,7 +1277,7 @@ static void qpnp_flash_led_work(struct work_struct *work)
 
 			} else if ( (flash_node->prgm_current == FBAD_TORCH1) ||
 					(flash_node->prgm_current == FBAD_PREFLASH) ) {
-				val = 0x07;	
+				val = 0x07;	//100mA(led0)
 				rc = qpnp_led_masked_write(led->spmi_dev,
 					FLASH_LED0_CURRENT(led->base),
 					FLASH_CURRENT_MASK, val);
@@ -1297,7 +1287,7 @@ static void qpnp_flash_led_work(struct work_struct *work)
 					goto exit_flash_led_work;
 				}
 
-				val = 0x03;	
+				val = 0x03;	//50mA (led1)
 				rc = qpnp_led_masked_write(led->spmi_dev,
 					FLASH_LED1_CURRENT(led->base),
 					FLASH_CURRENT_MASK, val);
@@ -1308,7 +1298,7 @@ static void qpnp_flash_led_work(struct work_struct *work)
 				}
 			} else {
 
-				val = 0x0B;	
+				val = 0x0B;	//150mA(led0)
 				rc = qpnp_led_masked_write(led->spmi_dev,
 					FLASH_LED0_CURRENT(led->base),
 					FLASH_CURRENT_MASK, val);
@@ -1318,7 +1308,7 @@ static void qpnp_flash_led_work(struct work_struct *work)
 					goto exit_flash_led_work;
 				}
 
-				val = 0x03;	
+				val = 0x03;	//50mA (led1)
 				rc = qpnp_led_masked_write(led->spmi_dev,
 					FLASH_LED1_CURRENT(led->base),
 					FLASH_CURRENT_MASK, val);
@@ -1515,7 +1505,7 @@ static void qpnp_flash_led_work(struct work_struct *work)
 		psy_prop.intval = true;
 		if (led->battery_psy) {
 			rc = led->battery_psy->set_property(led->battery_psy,
-						POWER_SUPPLY_PROP_OTG_PULSE_SKIP_ENABLE,	
+						POWER_SUPPLY_PROP_OTG_PULSE_SKIP_ENABLE,	//POWER_SUPPLY_PROP_FLASH_ACTIVE,
 								&psy_prop);
 			if (rc) {
 				dev_err(&led->spmi_dev->dev,
@@ -1828,7 +1818,11 @@ static void qpnp_flash_led_brightness_set(struct led_classdev *led_cdev,
 		value = flash_node->cdev.max_brightness;
 
 	flash_node->cdev.brightness = value;
-	if (led->flash_node[led->num_leds - 1].id ==
+	if (flash_node->id == FLASH_LED_2) {
+		if (value < FLASH_LED_MIN_CURRENT_MA && value != 0)
+			value = FLASH_LED_MIN_CURRENT_MA;
+		flash_node->prgm_current = value;
+	} else if (led->flash_node[led->num_leds - 1].id ==
 						FLASH_LED_SWITCH) {
 		if (flash_node->type == TORCH)
 			led->flash_node[led->num_leds - 1].type = TORCH;

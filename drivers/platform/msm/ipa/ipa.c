@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1678,9 +1678,6 @@ static int ipa_q6_set_ex_path_dis_agg(void)
 */
 int ipa_q6_cleanup(void)
 {
-	int client_idx;
-	int res;
-
 	ipa_inc_client_enable_clks();
 
 	if (ipa_q6_pipe_delay()) {
@@ -1699,20 +1696,38 @@ int ipa_q6_cleanup(void)
 		IPAERR("Failed to disable aggregation on Q6 pipes\n");
 		BUG();
 	}
+	return 0;
+}
+
+/**
+* ipa_q6_pipe_reset() - A cleanup for the Q6 pipes
+*                    in IPA HW. This is performed in case of SSR.
+*
+* Return codes:
+* 0: success
+* This is a mandatory procedure, in case one of the steps fails, the
+* AP needs to restart.
+*/
+int ipa_q6_pipe_reset(void)
+{
+	int client_idx;
+	int res;
 
 	if (!atomic_read(&ipa_ctx->uc_ctx.uc_loaded)) {
 		IPAERR("uC is not loaded, won't reset Q6 pipes\n");
 	} else {
-		for (client_idx = 0; client_idx < IPA_CLIENT_MAX; client_idx++)
-			if (IPA_CLIENT_IS_Q6_CONS(client_idx) ||
-			    IPA_CLIENT_IS_Q6_PROD(client_idx)) {
-				res = ipa_uc_reset_pipe(client_idx);
-				if (res)
-					BUG();
-			}
+	for (client_idx = 0; client_idx < IPA_CLIENT_MAX; client_idx++)
+		if (IPA_CLIENT_IS_Q6_CONS(client_idx) ||
+		    IPA_CLIENT_IS_Q6_PROD(client_idx)) {
+			res = ipa_uc_reset_pipe(client_idx);
+			if (res)
+				BUG();
+		}
 	}
 
-	ipa_ctx->q6_proxy_clk_vote_valid = true;
+	/* set proxy vote before decrement */
+	ipa_proxy_clk_vote();
+	ipa_dec_client_disable_clks();
 	return 0;
 }
 

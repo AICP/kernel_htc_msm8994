@@ -1,8 +1,12 @@
+/* From linux/arch/arm/mach-msm/board-m7-wifi.c
+*/
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/delay.h>
 #include <linux/err.h>
+//#include <asm/mach-types.h>
+//#include <asm/gpio.h>
 #include <asm/io.h>
 #include <linux/skbuff.h>
 #include <linux/wifi_tiwlan.h>
@@ -60,6 +64,9 @@ int hima_wifi_get_mac_addr(unsigned char *buf);
 	(DHD_SKB_4PAGE_BUF_NUM))
 
 #define HW_OOB 1
+//#ifdef HW_OOB
+//#undef HW_OOB
+//#endif
 #define PREALLOC_FREE_MAGIC		0xFEDC
 
 static struct sk_buff *wlan_static_skb[WLAN_SKB_BUF_NUM];
@@ -261,7 +268,8 @@ err_skb_alloc:
 	return -ENOMEM;
 }
 
-#if 1 
+//#if 0 //FIXME
+#if 1 //FIXME
 static struct resource hima_wifi_resources[] = {
 	[0] = {
 		.name		= "bcmdhd_wlan_irq",
@@ -288,8 +296,10 @@ static struct wifi_platform_data hima_wifi_control = {
 static struct platform_device hima_wifi_device = {
 	.name           = "bcmdhd_wlan",
 	.id             = 1,
-	.num_resources  = ARRAY_SIZE(hima_wifi_resources),  
-	.resource       = hima_wifi_resources,  
+//	.num_resources  = 0, //ARRAY_SIZE(hima_wifi_resources),  //FIXME
+//	.resource       = 0, //hima_wifi_resources,  //FIXME
+	.num_resources  = ARRAY_SIZE(hima_wifi_resources),  //FIXME
+	.resource       = hima_wifi_resources,  //FIXME
 	.dev            = {
 		.platform_data = &hima_wifi_control,
 	},
@@ -298,7 +308,7 @@ static struct platform_device hima_wifi_device = {
 #define NVS_LEN_OFFSET		0x0C
 #define NVS_DATA_OFFSET		0x40
 
-#if 0 
+#if 0 //FIXME
 static unsigned hima_wifi_update_nvs(char *str)
 {
 	unsigned char *ptr;
@@ -307,10 +317,10 @@ static unsigned hima_wifi_update_nvs(char *str)
 	if (!str)
 		return -EINVAL;
 	ptr = get_wifi_nvs_ram();
-	
+	/* Size in format LE assumed */
 	memcpy(&len, ptr + NVS_LEN_OFFSET, sizeof(len));
 
-	
+	/* the last bye in NVRAM is 0, trim it */
 	if (ptr[NVS_DATA_OFFSET + len - 1] == 0)
 		len -= 1;
 
@@ -341,10 +351,10 @@ static unsigned strip_nvs_param(char *param)
 	if (!param)
 		return -EINVAL;
 	ptr = get_wifi_nvs_ram();
-	
+	/* Size in format LE assumed */
 	memcpy(&len, ptr + NVS_LEN_OFFSET, sizeof(len));
 
-	
+	/* the last bye in NVRAM is 0, trim it */
 	if (ptr[NVS_DATA_OFFSET + len - 1] == 0)
 		len -= 1;
 
@@ -352,7 +362,7 @@ static unsigned strip_nvs_param(char *param)
 
 	param_len = strlen(param);
 
-	
+	/* search param */
 	for (start_idx = 0; start_idx < len - param_len; start_idx++) {
 		if (memcmp(&nvs_data[start_idx], param, param_len) == 0)
 			break;
@@ -360,7 +370,7 @@ static unsigned strip_nvs_param(char *param)
 
 	end_idx = 0;
 	if (start_idx < len - param_len) {
-		
+		/* search end-of-line */
 		for (end_idx = start_idx + param_len; end_idx < len; end_idx++) {
 			if (nvs_data[end_idx] == '\n' || nvs_data[end_idx] == 0)
 				break;
@@ -368,7 +378,7 @@ static unsigned strip_nvs_param(char *param)
 	}
 
 	if (start_idx < end_idx) {
-		
+		/* move the remain data forward */
 		for (; end_idx + 1 < len; start_idx++, end_idx++)
 			nvs_data[start_idx] = nvs_data[end_idx+1];
 
@@ -381,7 +391,7 @@ static unsigned strip_nvs_param(char *param)
 #endif
 
 #define WIFI_MAC_PARAM_STR     "macaddr="
-#define WIFI_MAX_MAC_LEN       17 
+#define WIFI_MAX_MAC_LEN       17 /* XX:XX:XX:XX:XX:XX */
 
 static uint
 get_mac_from_wifi_nvs_ram(char *buf, unsigned int buf_len)
@@ -401,11 +411,11 @@ get_mac_from_wifi_nvs_ram(char *buf, unsigned int buf_len)
 	if (mac_ptr) {
 		mac_ptr += strlen(WIFI_MAC_PARAM_STR);
 
-		
+		/* skip leading space */
 		while (mac_ptr[0] == ' ')
 			mac_ptr++;
 
-		
+		/* locate end-of-line */
 		len = 0;
 		while (mac_ptr[len] != '\r' && mac_ptr[len] != '\n' &&
 			mac_ptr[len] != '\0') {
@@ -433,7 +443,7 @@ int hima_wifi_get_mac_addr(unsigned char *buf)
 
 	mac_len = get_mac_from_wifi_nvs_ram(mac, WIFI_MAX_MAC_LEN);
 	if (mac_len > 0) {
-		
+		/* Mac address to pattern */
 		sscanf(mac, "%02x:%02x:%02x:%02x:%02x:%02x",
 		&macpattern[0], &macpattern[1], &macpattern[2],
 		&macpattern[3], &macpattern[4], &macpattern[5]
@@ -545,12 +555,12 @@ int __init hima_wifi_init(void)
 	printk(KERN_INFO "%s: start\n", __func__);
 
 #ifdef HW_OOB
-	
+	//strip_nvs_param("sd_oobonly");
 #else
-	
+	//hima_wifi_update_nvs("sd_oobonly=1\n");
 #endif
-	
-	
+	//hima_wifi_update_nvs("btc_params80=0\n");
+	//hima_wifi_update_nvs("btc_params6=30\n");
 	hima_init_wifi_mem();
 
 	if (hima_wifi_device.resource != NULL) {

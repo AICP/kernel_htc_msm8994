@@ -41,19 +41,24 @@
 #include <linux/libfdt.h>
 #endif
 
+/* Define constants */
 #define FG_ROOM_TEMP  270
 
+/* Mask/Bit helpers */
 #define _FG_MASK(BITS, POS) \
 	((unsigned char)(((1 << (BITS)) - 1) << (POS)))
 #define FG_MASK(LEFT_BIT_POS, RIGHT_BIT_POS) \
 		_FG_MASK((LEFT_BIT_POS) - (RIGHT_BIT_POS) + 1, \
 				(RIGHT_BIT_POS))
 
+/* Register offsets */
 
+/* Interrupt offsets */
 #define INT_RT_STS(base)			(base + 0x10)
 #define INT_EN_CLR(base)			(base + 0x16)
 #define SYS_BATT(base)				(base + 0x07)
 
+/* SPMI Register offsets */
 #define SOC_MONOTONIC_SOC	0x09
 #define MEM_INTF_CFG		0x40
 #define MEM_INTF_CTL		0x41
@@ -73,8 +78,10 @@
 
 #define REG_OFFSET_PERP_SUBTYPE	0x05
 
+/* RAM register offsets */
 #define RAM_OFFSET		0x400
 
+/* Bit/Mask definitions */
 #define FULL_PERCENT		0xFF
 #define MAX_TRIES_SOC		5
 #define MA_MV_BIT_RES		39
@@ -84,6 +91,7 @@
 #define REDO_FIRST_ESTIMATE	BIT(3)
 #define RESTART_GO		BIT(0)
 
+/* SUBTYPE definitions */
 #define FG_SOC			0x9
 #define FG_BATT			0xA
 #define FG_ADC			0xB
@@ -96,20 +104,22 @@
 	_adc_val = (u8)((_current) * 100 / 976);	\
 }
 
+/* stored consistent parameters */
 #define FG_STORE_MAGIC_NUM          0xDDAACC00
-#define FG_STORE_MAGIC_OFFSET       3104    
-#define FG_STORE_SOC_OFFSET         3108    
-#define FG_STORE_CURRTIME_OFFSET    3120    
-#define FG_STORE_TEMP_OFFSET		3140    
+#define FG_STORE_MAGIC_OFFSET       3104    /*0xC20*/
+#define FG_STORE_SOC_OFFSET         3108    /*0xC24*/
+#define FG_STORE_CURRTIME_OFFSET    3120    /*0xC30*/
+#define FG_STORE_TEMP_OFFSET		3140    /*0xC44*/
 
+/* Debug Flag Definitions */
 enum {
-	FG_SPMI_DEBUG_WRITES		= BIT(0), 
-	FG_SPMI_DEBUG_READS		= BIT(1), 
-	FG_IRQS				= BIT(2), 
-	FG_MEM_DEBUG_WRITES		= BIT(3), 
-	FG_MEM_DEBUG_READS		= BIT(4), 
-	FG_POWER_SUPPLY			= BIT(5), 
-	FG_STATUS			= BIT(6), 
+	FG_SPMI_DEBUG_WRITES		= BIT(0), /* Show SPMI writes */
+	FG_SPMI_DEBUG_READS		= BIT(1), /* Show SPMI reads */
+	FG_IRQS				= BIT(2), /* Show interrupts */
+	FG_MEM_DEBUG_WRITES		= BIT(3), /* Show SRAM writes */
+	FG_MEM_DEBUG_READS		= BIT(4), /* Show SRAM reads */
+	FG_POWER_SUPPLY			= BIT(5), /* Show POWER_SUPPLY */
+	FG_STATUS			= BIT(6), /* Show FG status changes */
 };
 
 struct fg_mem_setting {
@@ -125,6 +135,7 @@ struct fg_mem_data {
 	int	value;
 };
 
+/* FG_MEMIF setting index */
 enum fg_mem_setting_index {
 	FG_MEM_SOFT_COLD = 0,
 	FG_MEM_SOFT_HOT,
@@ -140,6 +151,7 @@ enum fg_mem_setting_index {
 	FG_MEM_SETTING_MAX,
 };
 
+/* FG_MEMIF data index */
 enum fg_mem_data_index {
 	FG_DATA_BATT_TEMP = 0,
 	FG_DATA_OCV,
@@ -147,7 +159,7 @@ enum fg_mem_data_index {
 	FG_DATA_CURRENT,
 	FG_DATA_BATT_ESR,
 	FG_DATA_BATT_ESR_COUNT,
-	
+	/* values below this only gets read once per profile reload */
 	FG_DATA_CPRED_VOLTAGE,
 	FG_DATA_BATT_ID,
 	FG_DATA_BATT_ID_INFO,
@@ -162,7 +174,7 @@ enum fg_mem_data_index {
 	}						\
 
 static struct fg_mem_setting settings[FG_MEM_SETTING_MAX] = {
-	
+	/*       ID                    Address, Offset, Value*/
 	SETTING(SOFT_COLD,       0x454,   0,      100),
 	SETTING(SOFT_HOT,        0x454,   1,      400),
 	SETTING(HARD_COLD,       0x454,   2,      50),
@@ -185,7 +197,7 @@ static struct fg_mem_setting settings[FG_MEM_SETTING_MAX] = {
 	}						\
 
 static struct fg_mem_data fg_data[FG_DATA_MAX] = {
-	
+	/*       ID           Address, Offset, Length, Value*/
 	DATA(BATT_TEMP,       0x550,   2,      2,     -EINVAL),
 	DATA(OCV,             0x588,   3,      2,     -EINVAL),
 	DATA(VOLTAGE,         0x5CC,   1,      2,     -EINVAL),
@@ -320,8 +332,13 @@ struct fg_chip {
 	unsigned int    TEMP_DIFF_BELOW_RT;
 	unsigned int	batt_stored_update_time;
 
-	
+	/* HTC add */
 	struct work_struct	exe_smbchg_aicl_wa;
+	/* for battery cycle */
+	unsigned int		total_level_raw;
+	unsigned int		overheat_55_sec;
+	unsigned int		batt_first_use_time;
+	unsigned int		batt_cycle_checksum;
 };
 static struct fg_chip *the_chip;
 
@@ -332,17 +349,20 @@ struct pm8941_battery_data_store {
 };
 static struct pm8941_battery_data_store store_emmc;
 
-#define ADDR_LEN	4	
-#define CHARS_PER_ITEM	3	
-#define ITEMS_PER_LINE	4	
+/* FG_MEMIF DEBUGFS structures */
+#define ADDR_LEN	4	/* 3 byte address + 1 space character */
+#define CHARS_PER_ITEM	3	/* Format is 'XX ' */
+#define ITEMS_PER_LINE	4	/* 4 data items per line */
 #define MAX_LINE_LENGTH  (ADDR_LEN + (ITEMS_PER_LINE * CHARS_PER_ITEM) + 1)
 #define MAX_REG_PER_TRANSACTION	(8)
 
+/* for read project name */
 #define DT_ROOT_VALUE 0
 enum device_project {
        DEVICE_PROJ_INVALID = 0,
        DEVICE_PROJ_HIMA,
        DEVICE_PROJ_B3,
+       DEVICE_PROJ_ACA,
        DEVICE_PROJ_MAX,
 };
 static enum device_project project_name;
@@ -353,25 +373,29 @@ static const char *default_batt_type	= "Unknown Battery";
 static const char *missing_batt_type	= "Disconnected Battery";
 int fg_probe_flag = 0;
 
+/* static global variables*/
 static int consistent_flag = false;
 static int htc_batt_capacity;
 
+/* extern functions */
 extern int get_partition_num_by_name(char *name);
 
+/* Log buffer */
 struct fg_log_buffer {
-	size_t rpos;	
-	size_t wpos;	
-	size_t len;	
-	char data[0];	
+	size_t rpos;	/* Current 'read' position in buffer */
+	size_t wpos;	/* Current 'write' position in buffer */
+	size_t len;	/* Length of the buffer */
+	char data[0];	/* Log buffer */
 };
 
+/* transaction parameters */
 struct fg_trans {
-	u32 cnt;	
-	u16 addr;	
-	u32 offset;	
+	u32 cnt;	/* Number of bytes to read */
+	u16 addr;	/* 12-bit address in SRAM */
+	u32 offset;	/* Offset of last read data + byte offset */
 	struct fg_chip *chip;
-	struct fg_log_buffer *log; 
-	u8 *data;	
+	struct fg_log_buffer *log; /* log buffer */
+	u8 *data;	/* fg data that is read */
 };
 
 struct fg_dbgfs {
@@ -576,7 +600,7 @@ static int fg_config_access(struct fg_chip *chip, bool write,
 	u8 intf_ctl = 0;
 
 	if (otp) {
-		
+		/* Configure OTP access */
 		rc = fg_masked_write(chip, chip->mem_base + OTP_CFG1,
 				0xFF, 0x00, 1);
 		if (rc) {
@@ -612,11 +636,11 @@ static int fg_req_and_wait_access(struct fg_chip *chip, int timeout)
 	}
 
 wait:
-	
+	/* Wait for MEM_AVAIL IRQ. */
 	ret = wait_for_completion_interruptible_timeout(
 			&chip->sram_access_granted,
 			msecs_to_jiffies(timeout));
-	
+	/* If we were interrupted wait again one more time. */
 	if (ret == -ERESTARTSYS && !tried_again) {
 		tried_again = true;
 		goto wait;
@@ -699,7 +723,7 @@ static int fg_sub_mem_read(struct fg_chip *chip, u8 *val, u16 address, int len,
 				chip->mem_base + MEM_INTF_RD_DATA0 + offset,
 				min(len, BUF_LEN - offset));
 
-			
+			/* manually set address to allow continous reads */
 			address += BUF_LEN;
 
 			rc = fg_set_ram_addr(chip, &address);
@@ -808,7 +832,7 @@ static int fg_mem_write(struct fg_chip *chip, u8 *val, u16 address,
 			if (rc)
 				goto out;
 			memcpy(word + offset, wr_data, sublen);
-			
+			/* configure access as burst if more to write */
 			rc = fg_config_access(chip, 1, (len - sublen) > 0, 0);
 			if (rc)
 				goto out;
@@ -958,7 +982,7 @@ static int fg_configure_soc(struct fg_chip *chip)
 	atomic_add_return(1, &chip->memif_user_cnt);
 	mutex_unlock(&chip->rw_lock);
 
-	
+	/* Read Battery SOC */
 	rc = fg_mem_read(chip, reg, BATTERY_SOC_REG, 3, BATTERY_SOC_OFFSET, 1);
 	if (rc) {
 		pr_err("Failed to read battery soc\n");
@@ -1312,12 +1336,12 @@ static void update_temp_data(struct work_struct *work)
 		}
 
 wait:
-		
+		/* Wait for MEMIF access revoked */
 		ret = wait_for_completion_interruptible_timeout(
 				&chip->sram_access_revoked,
 				msecs_to_jiffies(timeout));
 
-		
+		/* If we were interrupted wait again one more time. */
 		if (ret == -ERESTARTSYS && !tried_again) {
 			tried_again = true;
 			goto wait;
@@ -1328,7 +1352,7 @@ wait:
 		}
 	}
 
-	
+	/* Read FG_DATA_BATT_TEMP now */
 	rc = fg_mem_read(chip, reg, fg_data[0].address,
 		fg_data[0].len, fg_data[0].offset,
 		chip->sw_rbias_ctrl ? 1 : 0);
@@ -1536,8 +1560,11 @@ int emmc_misc_write(int val, int offset)
 	ssize_t nread;
 	int pnum = get_partition_num_by_name("misc");
 
+#if 1   // Removed for misc_partition write permission
+	return -1;
+#endif
 	if (pnum < 0) {
-		pr_err("unknown partition number for misc partition\n");
+		pr_warn("unknown partition number for misc partition\n");
 		return 0;
 	}
 	sprintf(filename, "/dev/block/mmcblk0p%d", pnum);
@@ -1550,13 +1577,13 @@ int emmc_misc_write(int val, int offset)
 
 	filp->f_pos = offset;
 	nread = kernel_write(filp, (char *)&w_val, sizeof(int), filp->f_pos);
-	
+	pr_info("%X (%ld)\n", w_val, nread);
+	vfs_fsync(filp, 0);
 
 	filp_close(filp, NULL);
 
 	return 1;
 }
-
 
 #define SYS_BATT_STS_MASK					FG_MASK(7, 5)
 #define SYS_BATT_STS_SHIFT					5
@@ -1611,7 +1638,7 @@ int pmi8994_fg_get_batt_soc(int *result)
 		return -EINVAL;
 	}
 
-	
+	//Get the current temperature to store it
 	pmi8994_fg_get_batt_temperature(&curr_tmp);
 	state_of_charge = *result = get_prop_capacity(the_chip);
 
@@ -1729,8 +1756,8 @@ int pmi8994_fg_store_battery_gauge_data_emmc(void)
 		pr_err("called before init\n");
 		return -EINVAL;
 	}
-
-	
+#if 0   // Removed for misc_partition write permission
+	/* Store battery data in Emmc when unplug cable in off mode charging. */
 	if (the_chip->store_batt_data_soc_thre > 0
 		&& store_emmc.store_soc > 0
 		&& store_emmc.store_soc <= the_chip->store_batt_data_soc_thre) {
@@ -1743,7 +1770,7 @@ int pmi8994_fg_store_battery_gauge_data_emmc(void)
 		pr_info("Stored soc=%d,currtime_s=%lu, stored_temp=%d\n",
 			store_emmc.store_soc, store_emmc.store_currtime_s, store_emmc.store_temperature);
 	}
-
+#endif
 	return 0;
 }
 
@@ -1755,7 +1782,7 @@ int pmi8994_fg_get_battery_ui_soc(void)
 	}
 	pr_debug("batt_stored_soc: %d\n", the_chip->batt_stored_soc);
 
-	
+	/* batt_stored_soc could be 0, not to send 0 value */
 	if (the_chip->batt_stored_soc <= 0 || the_chip->batt_stored_soc > 100 || !consistent_flag)
 		return -EINVAL;
 
@@ -2074,6 +2101,25 @@ do {									\
 				" property rc = %d\n", rc);		\
 } while (0)
 
+/*
+#define OF_PROP_READ_64(chip, prop, dt_property, retval, optional)		\
+do {									\
+	if (retval)							\
+		break;							\
+	if (optional)							\
+		prop = -EINVAL;						\
+									\
+	retval = of_property_read_u64(chip->spmi->dev.of_node,		\
+					"qcom," dt_property	,	\
+					&prop);				\
+									\
+	if ((retval == -EINVAL) && optional)				\
+		retval = 0;						\
+	else if (retval)						\
+		dev_err(chip->dev, "Error reading " #dt_property	\
+				" property rc = %d\n", rc);		\
+} while (0)
+*/
 
 #define OF_READ_SETTING(type, qpnp_dt_property, retval, optional)	\
 do {									\
@@ -2088,6 +2134,24 @@ do {									\
 		retval = 0;						\
 	else if (retval)						\
 		pr_err("Error reading " #qpnp_dt_property		\
+				" property rc = %d\n", rc);		\
+} while (0)
+
+#define HTC_OF_PROP_READ(chip, prop, dt_property, retval, optional)		\
+do {									\
+	if (retval)							\
+		break;							\
+	if (optional)							\
+		prop = -EINVAL;						\
+									\
+	retval = of_property_read_u32(chip->spmi->dev.of_node,		\
+					"htc," dt_property	,	\
+					&prop);				\
+									\
+	if ((retval == -EINVAL) && optional)				\
+		retval = 0;						\
+	else if (retval)						\
+		dev_err(chip->dev, "Error reading " #dt_property	\
 				" property rc = %d\n", rc);		\
 } while (0)
 
@@ -2113,11 +2177,11 @@ static struct device_node *htc_battery_probe(struct device_node *node, int id_ra
 		    if (rc)
 		        pr_err("htc,batt_id missing in dt\n");
 
-			
+			/* parse battery type */
 			rc = of_property_read_string(cur_node, "qcom,battery-type", &battery_type);
 			if (rc) {
 				pr_err("qcom,battery-type missing in dt\n");
-				continue; 
+				continue; //Search for next node.
 			} else {
 				if (fg_debug_mask & FG_STATUS)
 					pr_info("battery_type(%s) project_name(%d) batt_id(%d)",
@@ -2127,10 +2191,12 @@ static struct device_node *htc_battery_probe(struct device_node *node, int id_ra
 					pr_info("Hima profile checking with id%d\n", batt_id);
 				else if (strstr(battery_type, "b3") && (project_name == DEVICE_PROJ_B3))
 					pr_info("B3 profile checking with id%d\n", batt_id);
+				else if (strstr(battery_type, "aca") && (project_name == DEVICE_PROJ_ACA))
+					pr_info("ACA profile checking with id%d\n", batt_id);
 				else if (strstr(battery_type, "unknown"))
 					pr_info("unknown profile checking with id%d\n", batt_id);
 				else
-					continue; 
+					continue; //Search for next node.
 			}
 
 			rc = of_property_read_u32(cur_node,
@@ -2169,7 +2235,7 @@ static struct device_node *htc_battery_probe(struct device_node *node, int id_ra
 			}
 		}
 	}
-	
+	/* Fail to correctly load battery profile */
 	htc_batt_id = 255;
 	return NULL;
 }
@@ -2203,7 +2269,7 @@ int pmi8994_fg_check_consistent(void)
 		return 0;
 	}
 
-	
+	/* Restore battery data for keeping soc stable */
 	if (the_chip->batt_stored_magic_num == FG_STORE_MAGIC_NUM
 			&& the_chip->store_batt_data_soc_thre > 0 && batt_temp >= 0
 			&& ((curr_soc > the_chip->batt_stored_soc) ||
@@ -2225,6 +2291,17 @@ int pmi8994_fg_check_consistent(void)
 	return rc;
 }
 
+void pmi8994_fg_get_batt_cycle(unsigned int *total_level, unsigned int *overheat_sec,
+				unsigned int *first_use_time, unsigned int *batt_checksum)
+{
+	*total_level = the_chip->total_level_raw;
+	*overheat_sec = the_chip->overheat_55_sec;
+	*first_use_time = the_chip->batt_first_use_time;
+	*batt_checksum = the_chip->batt_cycle_checksum;
+	pr_info("total_level_raw=%u, overheat_55_sec=%u, batt_first_use_time=%u, batt_cycle_checksum=%u\n",
+		*total_level, *overheat_sec, *first_use_time, *batt_checksum);
+}
+
 static enum device_project check_device_project(void)
 {
 	const char *machine_name;
@@ -2238,6 +2315,8 @@ static enum device_project check_device_project(void)
 				proj = DEVICE_PROJ_HIMA;
 			else if (strstr(machine_name, "B3"))
 				proj = DEVICE_PROJ_B3;
+			else if (strstr(machine_name, "ACA"))
+				proj = DEVICE_PROJ_ACA;
 			else
 				proj = DEVICE_PROJ_HIMA;
 		}
@@ -2273,7 +2352,7 @@ static int update_chg_iterm(struct fg_chip *chip)
 static void batt_to_setpoint_adc(int vbatt_mv, u8 *data)
 {
 	int val;
-	
+	/* Battery voltage is an offset from 0 V and LSB is 1/2^15. */
 	val = DIV_ROUND_CLOSEST(vbatt_mv * 32768, 5000);
 	data[0] = val & 0xFF;
 	data[1] = val >> 8;
@@ -2328,7 +2407,7 @@ wait:
 	fg_stay_awake(&chip->profile_wakeup_source);
 	ret = wait_for_completion_interruptible_timeout(&chip->batt_id_avail,
 			msecs_to_jiffies(PROFILE_LOAD_TIMEOUT_MS));
-	
+	/* If we were interrupted wait again one more time. */
 	if (ret == -ERESTARTSYS && !tried_again) {
 		tried_again = true;
 		pr_debug("interrupted, waiting again\n");
@@ -2339,7 +2418,7 @@ wait:
 		goto no_profile;
 	}
 
-	
+	/* Check device project name */
 	project_name = check_device_project();
 	if (project_name == DEVICE_PROJ_INVALID)
 		pr_err("Unable to get project name\n");
@@ -2428,6 +2507,10 @@ wait:
 				DUMP_PREFIX_NONE, 16, 1, chip->batt_profile,
 				chip->batt_profile_len, false);
 
+	/*
+	 * release the sram access and configure the correct settings
+	 * before re-requesting access.
+	 */
 	mutex_lock(&chip->rw_lock);
 	fg_release_access(chip);
 
@@ -2438,7 +2521,7 @@ wait:
 		goto unlock_and_fail;
 	}
 
-	
+	/* unset the restart bits so the fg doesn't continuously restart */
 	reg = REDO_FIRST_ESTIMATE | RESTART_GO;
 	rc = fg_masked_write(chip, chip->soc_base + SOC_RESTART,
 			reg, 0, 1);
@@ -2455,13 +2538,17 @@ wait:
 	}
 	mutex_unlock(&chip->rw_lock);
 
-	
+	/* read once to get a fg cycle in */
 	rc = fg_mem_read(chip, &reg, PROFILE_INTEGRITY_REG, 1, 0, 0);
 	if (rc) {
 		pr_err("failed to read profile integrity rc=%d\n", rc);
 		goto fail;
 	}
 
+	/*
+	 * If this is not the first time a profile has been loaded, sleep for
+	 * 3 seconds to make sure the NO_OTP_RELOAD is cleared in memory
+	 */
 	if (chip->first_profile_loaded)
 		msleep(3000);
 
@@ -2477,7 +2564,7 @@ wait:
 	atomic_add_return(1, &chip->memif_user_cnt);
 	mutex_unlock(&chip->rw_lock);
 
-	
+	/* write the battery profile */
 	rc = fg_mem_write(chip, chip->batt_profile, BATT_PROFILE_OFFSET,
 			chip->batt_profile_len, 0, 1);
 	if (rc) {
@@ -2485,7 +2572,7 @@ wait:
 		goto sub_and_fail;
 	}
 
-	
+	/* write the integrity bits and release access */
 	rc = fg_mem_masked_write(chip, PROFILE_INTEGRITY_REG,
 			PROFILE_INTEGRITY_BIT, PROFILE_INTEGRITY_BIT, 0);
 	if (rc) {
@@ -2493,8 +2580,12 @@ wait:
 		goto sub_and_fail;
 	}
 
-	
+	/* decrement the user count so that memory access can be released */
 	fg_release_access_if_necessary(chip);
+	/*
+	 * set the restart bits so that the next fg cycle will reload
+	 * the profile
+	 */
 	rc = fg_masked_write(chip, chip->soc_base + SOC_BOOT_MOD,
 			NO_OTP_PROF_RELOAD, NO_OTP_PROF_RELOAD, 1);
 	if (rc) {
@@ -2510,7 +2601,7 @@ wait:
 		goto fail;
 	}
 
-	
+	/* wait for the first estimate to complete */
 	for (tries = 0; tries < MAX_TRIES_FIRST_EST; tries++) {
 		msleep(FIRST_EST_WAIT_MS);
 
@@ -2534,7 +2625,7 @@ wait:
 		pr_err("failed to set no otp reload bit\n");
 		goto fail;
 	}
-	
+	/* unset the restart bits so the fg doesn't continuously restart */
 	reg = REDO_FIRST_ESTIMATE | RESTART_GO;
 	rc = fg_masked_write(chip, chip->soc_base + SOC_RESTART,
 			reg, 0, 1);
@@ -2549,10 +2640,10 @@ done:
 	fg_probe_flag = 1;
 	update_chg_iterm(chip);
 	update_cc_cv_setpoint(chip);
-	
-	
-	
-	
+	//if (pmi8994_fg_check_consistent(chip) == 1) {
+	//	pr_info("Use stored UI level.\n");
+	//}
+	/* only when battery profile loaded, to execute fake_src_detect */
 	htc_gauge_event_notify(HTC_GAUGE_EVENT_READY);
 	if (chip->power_supply_registered)
 		power_supply_changed(&chip->bms_psy);
@@ -2659,10 +2750,18 @@ static int fg_of_init(struct fg_chip *chip)
 	OF_PROP_READ(chip, chip->batt_stored_update_time, "stored-batt-update-time", rc, 1);
 	OF_PROP_READ(chip, chip->batt_stored_temperature,"stored-batt-temperature", rc, 1);
 	OF_PROP_READ(chip, chip->TEMP_DIFF_BELOW_RT, "stored-batt-temp-diff", rc, 1);
+	/* for battery cycle */
+	OF_PROP_READ(chip, chip->total_level_raw, "stored-batt-total-level", rc, 1);
+	OF_PROP_READ(chip, chip->overheat_55_sec, "stored-batt-overheat-sec", rc, 1);
+	OF_PROP_READ(chip, chip->batt_first_use_time, "stored-batt-first-use", rc, 1);
+	OF_PROP_READ(chip, chip->batt_cycle_checksum, "stored-batt-checksum", rc, 1);
 
 	pr_info("stored-batt-soc=%d, stored-batt-update-time=%ul, stored-batt-temperature=%d, stored-batt-temp-diff=%d\n"
 			,chip->batt_stored_soc, chip->batt_stored_update_time, chip->batt_stored_temperature, chip->TEMP_DIFF_BELOW_RT );
-	
+	pr_info("stored-batt-total-level=%u, stored-batt-overheat-sec=%u, stored-batt-first-use=%u, stored-batt-checksum=%u\n"
+			,chip->total_level_raw, chip->overheat_55_sec, chip->batt_first_use_time, chip->batt_cycle_checksum);
+
+	/* Get the use-otp-profile property */
 	chip->use_otp_profile = of_property_read_bool(
 			chip->spmi->dev.of_node,
 			"qcom,use-otp-profile");
@@ -2788,8 +2887,8 @@ static int fg_init_irqs(struct fg_chip *chip)
 				return rc;
 			}
 
-			
-			
+			/* Disable it first for not waking up in suspend */
+			//enable_irq_wake(chip->soc_irq[DELTA_SOC].irq);
 			enable_irq_wake(chip->soc_irq[FULL_SOC].irq);
 			enable_irq_wake(chip->soc_irq[EMPTY_SOC].irq);
 			break;
@@ -2901,14 +3000,14 @@ static int fg_memif_data_open(struct inode *inode, struct file *file)
 		return -EINVAL;
 	}
 
-	
+	/* Per file "transaction" data */
 	trans = kzalloc(sizeof(*trans), GFP_KERNEL);
 	if (!trans) {
 		pr_err("Unable to allocate memory for transaction data\n");
 		return -ENOMEM;
 	}
 
-	
+	/* Allocate log buffer */
 	log = kzalloc(logbufsize, GFP_KERNEL);
 
 	if (!log) {
@@ -2921,7 +3020,7 @@ static int fg_memif_data_open(struct inode *inode, struct file *file)
 	log->wpos = 0;
 	log->len = logbufsize - sizeof(*log);
 
-	
+	/* Allocate data buffer */
 	data_buf = kzalloc(databufsize, GFP_KERNEL);
 
 	if (!data_buf) {
@@ -2980,6 +3079,18 @@ static int print_to_log(struct fg_log_buffer *log, const char *fmt, ...)
 	return cnt;
 }
 
+/**
+ * write_next_line_to_log: Writes a single "line" of data into the log buffer
+ * @trans: Pointer to SRAM transaction data.
+ * @offset: SRAM address offset to start reading from.
+ * @pcnt: Pointer to 'cnt' variable.  Indicates the number of bytes to read.
+ *
+ * The 'offset' is a 12-bit SRAM address.
+ *
+ * On a successful read, the pcnt is decremented by the number of data
+ * bytes read from the SRAM.  When the cnt reaches 0, all requested bytes have
+ * been read.
+ */
 static int
 write_next_line_to_log(struct fg_trans *trans, int offset, size_t *pcnt)
 {
@@ -2992,7 +3103,7 @@ write_next_line_to_log(struct fg_trans *trans, int offset, size_t *pcnt)
 	int items_to_read = min(ARRAY_SIZE(data) - padding, *pcnt);
 	int items_to_log = min(ITEMS_PER_LINE, padding + items_to_read);
 
-	
+	/* Buffer needs enough space for an entire line */
 	if ((log->len - log->wpos) < MAX_LINE_LENGTH)
 		goto done;
 
@@ -3000,26 +3111,26 @@ write_next_line_to_log(struct fg_trans *trans, int offset, size_t *pcnt)
 
 	*pcnt -= items_to_read;
 
-	
+	/* Each line starts with the aligned offset (12-bit address) */
 	cnt = print_to_log(log, "%3.3X ", offset & 0xfff);
 	if (cnt == 0)
 		goto done;
 
-	
+	/* If the offset is unaligned, add padding to right justify items */
 	for (i = 0; i < padding; ++i) {
 		cnt = print_to_log(log, "-- ");
 		if (cnt == 0)
 			goto done;
 	}
 
-	
+	/* Log the data items */
 	for (j = 0; i < items_to_log; ++i, ++j) {
 		cnt = print_to_log(log, "%2.2X ", data[j]);
 		if (cnt == 0)
 			goto done;
 	}
 
-	
+	/* If the last character was a space, then replace it with a newline */
 	if (log->wpos > 0 && log->data[log->wpos - 1] == ' ')
 		log->data[log->wpos - 1] = '\n';
 
@@ -3027,6 +3138,12 @@ done:
 	return cnt;
 }
 
+/**
+ * get_log_data - reads data from SRAM and saves to the log buffer
+ * @trans: Pointer to SRAM transaction data.
+ *
+ * Returns the number of "items" read or SPMI error code for read failures.
+ */
 static int get_log_data(struct fg_trans *trans)
 {
 	int cnt, rc;
@@ -3051,10 +3168,10 @@ static int get_log_data(struct fg_trans *trans)
 		pr_err("dump failed: rc = %d\n", rc);
 		return rc;
 	}
-	
+	/* Reset the log buffer 'pointers' */
 	log->wpos = log->rpos = 0;
 
-	
+	/* Keep reading data until the log is full */
 	do {
 		last_cnt = item_cnt;
 		cnt = write_next_line_to_log(trans, offset, &item_cnt);
@@ -3063,13 +3180,22 @@ static int get_log_data(struct fg_trans *trans)
 		total_items_read += items_read;
 	} while (cnt && item_cnt > 0);
 
-	
+	/* Adjust the transaction offset and count */
 	trans->cnt = item_cnt;
 	trans->offset += total_items_read;
 
 	return total_items_read;
 }
 
+/**
+ * fg_memif_dfs_reg_read: reads value(s) from SRAM and fills user's buffer a
+ *  byte array (coded as string)
+ * @file: file pointer
+ * @buf: where to put the result
+ * @count: maximum space available in @buf
+ * @ppos: starting position
+ * @return number of user bytes read, or negative error value
+ */
 static ssize_t fg_memif_dfs_reg_read(struct file *file, char __user *buf,
 	size_t count, loff_t *ppos)
 {
@@ -3078,7 +3204,7 @@ static ssize_t fg_memif_dfs_reg_read(struct file *file, char __user *buf,
 	size_t ret;
 	size_t len;
 
-	
+	/* Is the the log buffer empty */
 	if (log->rpos >= log->wpos) {
 		if (get_log_data(trans) <= 0)
 			return 0;
@@ -3092,7 +3218,7 @@ static ssize_t fg_memif_dfs_reg_read(struct file *file, char __user *buf,
 		return -EFAULT;
 	}
 
-	
+	/* 'ret' is the number of bytes not copied */
 	len -= ret;
 
 	*ppos += len;
@@ -3121,7 +3247,7 @@ static ssize_t fg_memif_dfs_reg_write(struct file *file, const char __user *buf,
 	struct fg_trans *trans = file->private_data;
 	u32 offset = trans->offset;
 
-	
+	/* Make a copy of the user data */
 	char *kbuf = kmalloc(count + 1, GFP_KERNEL);
 	if (!kbuf)
 		return -ENOMEM;
@@ -3137,10 +3263,10 @@ static ssize_t fg_memif_dfs_reg_write(struct file *file, const char __user *buf,
 	*ppos += count;
 	kbuf[count] = '\0';
 
-	
+	/* Override the text buffer with the raw data */
 	values = kbuf;
 
-	
+	/* Parse the data in the buffer.  It should be a string of numbers */
 	while (sscanf(kbuf + pos, "%i%n", &data, &bytes_read) == 1) {
 		pos += bytes_read;
 		values[cnt++] = data & 0xff;
@@ -3150,7 +3276,7 @@ static ssize_t fg_memif_dfs_reg_write(struct file *file, const char __user *buf,
 		goto free_buf;
 
 	pr_info("address %x, count %d\n", offset, cnt);
-	
+	/* Perform the write(s) */
 
 	ret = fg_mem_write(trans->chip, values, offset,
 				cnt, 0, 0);
@@ -3173,6 +3299,10 @@ static const struct file_operations fg_memif_dfs_reg_fops = {
 	.write		= fg_memif_dfs_reg_write,
 };
 
+/**
+ * fg_dfs_create_fs: create debugfs file system.
+ * @return pointer to root directory or NULL if failed to create fs
+ */
 static struct dentry *fg_dfs_create_fs(void)
 {
 	struct dentry *root, *file;
@@ -3201,6 +3331,13 @@ err_remove_fs:
 	return NULL;
 }
 
+/**
+ * fg_dfs_get_root: return a pointer to FG debugfs root directory.
+ * @return a pointer to the existing directory, or if no root
+ * directory exists then create one. Directory is created with file that
+ * configures SRAM transaction, namely: address, and count.
+ * @returns valid pointer on success or NULL
+ */
 struct dentry *fg_dfs_get_root(void)
 {
 	if (dbgfs_data.root)
@@ -3208,14 +3345,18 @@ struct dentry *fg_dfs_get_root(void)
 
 	if (mutex_lock_interruptible(&dbgfs_data.lock) < 0)
 		return NULL;
-	
-	if (!dbgfs_data.root) { 
+	/* critical section */
+	if (!dbgfs_data.root) { /* double checking idiom */
 		dbgfs_data.root = fg_dfs_create_fs();
 	}
 	mutex_unlock(&dbgfs_data.lock);
 	return dbgfs_data.root;
 }
 
+/*
+ * fg_dfs_create: adds new fg_mem if debugfs entry
+ * @return zero on success
+ */
 int fg_dfs_create(struct fg_chip *chip)
 {
 	struct dentry *root;
@@ -3302,7 +3443,7 @@ static int bcl_trim_workaround(struct fg_chip *chip)
 static u8 batt_to_setpoint_8b(int vbatt)
 {
 	int val;
-	
+	/* Battery voltage is an offset from 2.5 V and LSB is 5/2^9. */
 	val = (vbatt - 2500) * 512 / 1000;
 	return DIV_ROUND_CLOSEST(val, 5);
 }
@@ -3325,7 +3466,7 @@ static int fg_hw_init(struct fg_chip *chip)
 	int rc = 0;
 
 	update_iterm(chip);
-	if (0)
+	if (0)//FIXME
 		update_bcl_thresholds(chip);
 
 	rc = fg_mem_masked_write(chip, EXTERNAL_SENSE_SELECT,
@@ -3523,7 +3664,7 @@ static int fg_probe(struct spmi_device *spmi)
 		goto of_init_fail;
 	}
 
-	
+	/* hold memory access until initialization finishes */
 	atomic_add_return(1, &chip->memif_user_cnt);
 
 	rc = fg_init_irqs(chip);
@@ -3551,7 +3692,7 @@ static int fg_probe(struct spmi_device *spmi)
 		goto of_init_fail;
 	}
 
-	
+	//FIXME, not to use power_supply_registered
 	chip->power_supply_registered = false;
 
 	if (chip->mem_base) {
@@ -3578,7 +3719,7 @@ static int fg_probe(struct spmi_device *spmi)
 		goto power_supply_unregister;
 	}
 
-	
+	/* release memory access if necessary */
 	fg_release_access_if_necessary(chip);
 
 	if (!chip->use_otp_profile)

@@ -26,6 +26,7 @@
 
 &sdhc_1 {
 	vdd-supply = <&pm8994_l20>;
+	qcom,vdd-always-on;
 	qcom,vdd-voltage-level = <2950000 2950000>;
 	qcom,vdd-current-level = <200 570000>;
 
@@ -451,6 +452,8 @@
 			nxp,fwdl-gpio = <&msm_gpio 38 0x00>;
 			nxp,ven_isinvert = <0>;
 			nxp,isalive = <1>;
+			nfc_i2c_scl = <&msm_gpio 24 0x00>;
+			nfc_i2c_sda = <&msm_gpio 23 0x00>;
 		};
 
                 tps_65132@3E {
@@ -461,20 +464,6 @@
 
 	i2c@f9928000 { 	/*BLSP6, namely BLSP2 QUP0 */
 		status = "ok";
-		mhl_sii8620: sii8620@72 {
-			compatible = "mhl-sii8620";
-			reg = <0x72>;
-			interrupt-parent = <&msm_gpio>;
-			interrupts = <26 0x8>;
-			mhl-intr-gpio = <&msm_gpio 26 0>;
-			mhl-rst-gpio = <&msm_gpio 25 0>;
-			mhl-fw-wake-gpio = <&msm_gpio 93 0>;
-			mhl-dpdn-gpio = <&msm_gpio 57 0>;
-			mhl-dpdn-gpio_ = <&msm_gpio 57 0>;
-			avcc_1v-supply = <&pm8994_l25>;
-			vbus_dwc3-supply = <&pmi8994_otg_supply>;
-			qcom,hdmi-tx-map = <&mdss_hdmi_tx>;
-		};
 	};
 
 	sound {
@@ -886,6 +875,7 @@
 		qcom,batt-id-range-pct = <15>;
 		#include "batterydata-hima-id1.dtsi"
 		#include "batterydata-hima-id2.dtsi"
+		#include "batterydata-b3-id1.dtsi"
 		#include "batterydata-hima-unknown.dtsi"
 	};
 };

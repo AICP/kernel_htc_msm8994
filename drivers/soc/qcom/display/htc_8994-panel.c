@@ -32,24 +32,25 @@ enum pane_id {
 };
 
 struct dsi_power_data {
-	uint32_t sysrev;         			
+	uint32_t sysrev;         			/* system revision info */
 	struct regulator *tp_3v3;
 	struct regulator *tp_1v8;
-	struct regulator *vddio; 			
-	struct regulator *vdda;  			
-	struct regulator *vddpll;    			
-	uint16_t lcmp5v;				
-	uint16_t lcmn5v;				
+	struct regulator *vddio; 			/* LCMIO 1.8v */
+	struct regulator *vdda;  			/* MIPI 1.2v */
+	struct regulator *vddpll;    			/* PLL 1.8v */
+	uint16_t lcmp5v;				/* TPS65132 */
+	uint16_t lcmn5v;				/* TPS65132 */
 	uint16_t lcmio;
 	uint16_t lcmrst;
 };
 
+/***********************[I2C Boost Voltage Driver]**********************************/
 static struct i2c_client *tps_client = NULL;
 struct i2c_dev_info {
 	uint8_t	dev_addr;
 	struct i2c_client *client;
 };
-#define TPS_I2C_ADDRESS 	(0x3E)	
+#define TPS_I2C_ADDRESS 	(0x3E)	//7Bit address
 #define TPS_VPOS_ADDRESS	(0x00)
 #define TPS_VNEG_ADDRESS	(0x01)
 #define I2C_DEV_INFO(addr) \
@@ -61,11 +62,11 @@ enum tps_voltage {
 	VOL_5V5 = 2,
 };
 static uint8_t vol_cmd[6][2] = {
-	{TPS_VPOS_ADDRESS, 0x0A}, 	
+	{TPS_VPOS_ADDRESS, 0x0A}, 	/*0x0E:5v*/
 	{TPS_VNEG_ADDRESS, 0x0A},
-	{TPS_VPOS_ADDRESS, 0x0E}, 	
+	{TPS_VPOS_ADDRESS, 0x0E}, 	/*0x0E:5v4*/
 	{TPS_VNEG_ADDRESS, 0x0E},
-	{TPS_VPOS_ADDRESS, 0x0F}, 	
+	{TPS_VPOS_ADDRESS, 0x0F}, 	/*0x0F:5v5*/
 	{TPS_VNEG_ADDRESS, 0x0F},
 };
 
@@ -174,7 +175,7 @@ static int tps_65132_sysfs_init(void)
 static int tps_65132_add_i2c(struct i2c_client *client)
 {
 	int idx = 0;
-	tps_client = client;
+	tps_client = client;/*Allocate to global varible*/
 	if (tps_client == NULL) {
 		PR_DISP_ERR("%s() failed to get i2c adapter\n", __func__);
 		return -ENODEV;
@@ -245,6 +246,11 @@ static int __init tps_65132_init(void)
 	return ret;
 }
 #if 0
+/*
+ * Due to Mdss driver probe up is earlier than normal i2c compoment driver,
+ *This is the reason we can't use traditional way for i2c boost voltage driver.
+ *Below is the traditional i2c driver probe up source code.
+ */
 static int __init tps_65132_init(void)
 {
 	async_schedule(tps_65132_init_async, NULL);
@@ -282,6 +288,7 @@ static struct mdss_dsi_pwrctrl dsi_pwrctrl = {
 void incell_driver_ready(void (*fn))
 {
 	PR_DISP_WARN("%s()",__func__);
+//	dsi_pwrctrl.incell_touch_on = fn;
 	dsi_pwrctrl.notify_touch_cont_splash = fn;
 	dsi_pwrctrl.notify_touch_cont_splash(cont_splash_enabled);
 }
@@ -315,7 +322,7 @@ static int htc_hima_regulator_init(struct platform_device *pdev)
 	}
 	ctrl_pdata->dsi_pwrctrl_data = pwrdata;
 
-	
+	/*==GPIO Control Start==*/
 	pwrdata->lcmp5v = of_get_named_gpio(pdev->dev.of_node, "htc,lcm_p5v-gpio", 0);
 	if (!gpio_is_valid(pwrdata->lcmp5v)) {
 		PR_DISP_ERR("p5v gpio is not valid");
@@ -338,7 +345,7 @@ static int htc_hima_regulator_init(struct platform_device *pdev)
 	}
 	PR_DISP_INFO("p5v:%d n5v:%d io1v8:%d rst:%d", pwrdata->lcmp5v,
 							pwrdata->lcmn5v, pwrdata->lcmio,  pwrdata->lcmrst);
-	
+	/*==GPIO Control End==*/
 
 	cont_splash_enabled = ctrl_pdata->panel_data.panel_info.cont_splash_enabled;
 
@@ -415,7 +422,7 @@ static int htc_hima_panel_power_on(struct mdss_panel_data *pdata)
 
 			gpio_set_value(pwrdata->lcmp5v, 0);
 			usleep_range(5000, 5500);
-		}
+		}/*Force Low Power source pin low for TDI incell case*/
 
 		gpio_set_value(pwrdata->lcmio, 1);
 		usleep_range(10000, 12000);
@@ -442,7 +449,7 @@ static int htc_hima_panel_power_on(struct mdss_panel_data *pdata)
 			break;
 		}
 		if (strcmp(htc_get_bootmode(), bootstr))
-			tps_65132_boost_on(voltage);	
+			tps_65132_boost_on(voltage);	/*Boost to +5.5v & -5.5v*/
 		else
 			PR_DISP_ERR("Recovery mode, discard send boost i2c command");
 	} else {
@@ -450,7 +457,7 @@ static int htc_hima_panel_power_on(struct mdss_panel_data *pdata)
 		ret = -EINVAL;
 	}
 
-	if (pdata->panel_info.htc_panel_id == PANEL_TDI_RES69338 &&	
+	if (pdata->panel_info.htc_panel_id == PANEL_TDI_RES69338 &&	/*Incell only*/
 		dsi_pwrctrl.incell_touch_on != NULL)
 		dsi_pwrctrl.incell_touch_on(1);
 
@@ -478,7 +485,7 @@ static int htc_hima_panel_power_off(struct mdss_panel_data *pdata)
 	}
 	PR_DISP_INFO("++%s()++\n", __func__);
 
-	if (pdata->panel_info.htc_panel_id == PANEL_TDI_RES69338 && 	
+	if (pdata->panel_info.htc_panel_id == PANEL_TDI_RES69338 && 	/*Incell only*/
 		dsi_pwrctrl.incell_touch_on != NULL)
 		dsi_pwrctrl.incell_touch_on(0);
 
