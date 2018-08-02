@@ -176,7 +176,7 @@ int diag_md_write(int id, unsigned char *buf, int len, int ctx)
 /*++ 2014/10/22, USB Team, PCN00022 ++*/
 		driver->data_ready[i] |= USERMODE_DIAGFWD;
 /*-- 2014/10/22, USB Team, PCN00022--*/
-		pr_debug("diag: wake up logging process\n");
+		SDLOG_DBUG("diag: wake up logging process\n");
 		wake_up_interruptible(&driver->wait_q);
 	}
 

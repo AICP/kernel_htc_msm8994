@@ -34,6 +34,9 @@
 #include "qseecom_kernel.h"
 
 #define DEVICE_NAME "htc_sdservice"
+/*
+static char *appname = "htc_sdservice";
+*/
 
 #define HTC_SDKEY_LEN 32
 #define HTC_IOCTL_SDSERVICE 0x9527
@@ -51,7 +54,7 @@
 		__func__, current->pid, current->comm, ## args)
 #else
 #define PDEBUG(fmt, args...) do {} while (0)
-#endif 
+#endif /* HTC_SDSERVICE_DEBUG */
 
 #undef PERR
 #define PERR(fmt, args...) printk(KERN_ERR TAG "[E] %s(%i, %s): " fmt "\n", \
@@ -76,6 +79,7 @@ typedef struct _htc_sdservice_msg_s{
 	int resp_len;
 } htc_sdservice_msg_s;
 
+/* ATS structure, total size 6 * uint32 = 24 bytes */
 typedef struct {
 	struct {
 		uint8_t func_id;
@@ -135,6 +139,9 @@ static int do_cipher(int32_t is_enc, uint8_t *in_buf, uint8_t *key)
     else {
         err = crypto_blkcipher_decrypt(&desc, sg_out, sg_in, 32);
     }
+    /*
+	print_hex_dump(KERN_DEBUG, "enc: ", DUMP_PREFIX_NONE, 16, 1, tmp, 32, 0);
+    */
     memcpy(in_buf, tmp, 32);
 out:
     crypto_free_blkcipher(tfm);
@@ -150,6 +157,9 @@ static int do_hash(uint8_t *input_buf, uint32_t type, uint32_t mask)
     struct scatterlist sg[1];
     unsigned char tmp[32];
 
+    /*
+	print_hex_dump(KERN_DEBUG, "input_buf: ", DUMP_PREFIX_NONE, 16, 1, input_buf, 32, 0);
+     */
 	tfm = crypto_alloc_hash("sha256", type, mask);
 	if (IS_ERR(tfm)) {
 		PERR("alg: hash: Failed to load transform for %s: "
@@ -163,6 +173,9 @@ static int do_hash(uint8_t *input_buf, uint32_t type, uint32_t mask)
     sg_set_buf(&sg[0], input_buf, 32);
 
     err = crypto_hash_digest(&desc, sg, 32, tmp);
+    /*
+	print_hex_dump(KERN_DEBUG, "hash: ", DUMP_PREFIX_NONE, 16, 1, tmp, 32, 0);
+     */
     memcpy(input_buf, tmp, 32);
 	crypto_free_hash(tfm);
 
@@ -176,6 +189,11 @@ static long htc_sdservice_ioctl(struct file *file, unsigned int command, unsigne
 	int32_t ret = 0;
     uint8_t tmp_key[32] = {0};
     int32_t ii;
+    /*
+    struct qseecom_handle *l_QSEEComHandle = NULL;
+    struct qsc_send_cmd *send_cmd;
+    void *resp;
+    */
 
 	PDEBUG("command = %x", command);
 	switch (command) {
@@ -196,6 +214,50 @@ static long htc_sdservice_ioctl(struct file *file, unsigned int command, unsigne
 				return -EFAULT;
 			}
 
+            /*
+            ret = qseecom_start_app(&l_QSEEComHandle, appname, 1024);
+            if (ret) {
+                PERR("Start app: fail");
+                return -1;
+            } else {
+                PDEBUG("Start app: pass");
+            }
+            if(l_QSEEComHandle == NULL) {
+                PERR("Failed to get QSEECOM handle\n");
+                return -1;
+            }
+
+            send_cmd = (struct qsc_send_cmd *)l_QSEEComHandle->sbuf;
+            resp = (struct qsc_send_cmd *)((uintptr_t)(l_QSEEComHandle->sbuf) + l_QSEEComHandle->sbuf_len/2);
+            memset(resp, 0, HTC_SDKEY_LEN);
+
+            send_cmd->cmd_id = ITEM_SD_KEY_ENCRYPT;
+            send_cmd->test_buf_size = HTC_SDKEY_LEN;
+            memcpy((uint8_t *)send_cmd + sizeof(struct qsc_send_cmd), htc_sdkey, HTC_SDKEY_LEN);
+
+            ret = qseecom_set_bandwidth(l_QSEEComHandle, true);
+            if (ret) {
+                PERR("qseecom_set_bandwidth fail(%d)", ret);
+                return -1;
+            }
+            ret = qseecom_send_command(l_QSEEComHandle, send_cmd, HTC_SDKEY_LEN, resp, HTC_SDKEY_LEN);
+            if (ret) {
+                PERR("qseecom_send_cmd fail(%d)", ret);
+                return -1;
+            }
+            ret = qseecom_set_bandwidth(l_QSEEComHandle, false);
+            if (ret) {
+                PERR("qseecom_set_bandwidth fail(%d)", ret);
+                return -1;
+            }
+            memcpy(htc_sdkey, resp, HTC_SDKEY_LEN);
+            ret = qseecom_shutdown_app(&l_QSEEComHandle);
+
+			scm_flush_range((uint32_t)htc_sdkey, (uint32_t)htc_sdkey + HTC_SDKEY_LEN);
+			ret = secure_access_item(0, ITEM_SD_KEY_ENCRYPT, hmsg.req_len, htc_sdkey);
+			if (ret)
+				PERR("Encrypt SD key fail (%d)", ret);
+             */
             secure_get_msm_serial((uint32_t *)tmp_key);
             for (ii = 0; ii < sizeof(tmp_key) - 4; ii++)
                 tmp_key[ii + 4] = tmp_key[ii];
@@ -217,6 +279,50 @@ static long htc_sdservice_ioctl(struct file *file, unsigned int command, unsigne
 				PERR("copy_from_user error (sdkey)");
 				return -EFAULT;
 			}
+            /*
+            ret = qseecom_start_app(&l_QSEEComHandle, appname, 1024);
+            if (ret) {
+                PERR("Start app: fail");
+                return -1;
+            } else {
+                PDEBUG("Start app: pass");
+            }
+            if(l_QSEEComHandle == NULL) {
+                PERR("Failed to get QSEECOM handle\n");
+                return -1;
+            }
+
+            send_cmd = (struct qsc_send_cmd *)l_QSEEComHandle->sbuf;
+            resp = (struct qsc_send_cmd *)((uintptr_t)(l_QSEEComHandle->sbuf) + l_QSEEComHandle->sbuf_len/2);
+            memset(resp, 0, HTC_SDKEY_LEN);
+
+            send_cmd->cmd_id = ITEM_SD_KEY_DECRYPT;
+            send_cmd->test_buf_size = HTC_SDKEY_LEN;
+            memcpy((uint8_t *)send_cmd + sizeof(struct qsc_send_cmd), htc_sdkey, HTC_SDKEY_LEN);
+
+            ret = qseecom_set_bandwidth(l_QSEEComHandle, true);
+            if (ret) {
+                PERR("qseecom_set_bandwidth fail(%d)", ret);
+                return -1;
+            }
+            ret = qseecom_send_command(l_QSEEComHandle, send_cmd, HTC_SDKEY_LEN, resp, HTC_SDKEY_LEN);
+            if (ret) {
+                PERR("qseecom_send_cmd fail(%d)", ret);
+                return -1;
+            }
+            ret = qseecom_set_bandwidth(l_QSEEComHandle, false);
+            if (ret) {
+                PERR("qseecom_set_bandwidth fail(%d)", ret);
+                return -1;
+            }
+            memcpy(htc_sdkey, resp, HTC_SDKEY_LEN);
+            ret = qseecom_shutdown_app(&l_QSEEComHandle);
+
+			scm_flush_range((uint32_t)htc_sdkey, (uint32_t)htc_sdkey + HTC_SDKEY_LEN);
+			ret = secure_access_item(0, ITEM_SD_KEY_DECRYPT, hmsg.req_len, htc_sdkey);
+			if (ret)
+				PERR("Encrypt SD key fail (%d)", ret);
+             */
             secure_get_msm_serial((uint32_t *)tmp_key);
             for (ii = 0; ii < sizeof(tmp_key) - 4; ii++)
                 tmp_key[ii + 4] = tmp_key[ii];
@@ -240,6 +346,14 @@ static long htc_sdservice_ioctl(struct file *file, unsigned int command, unsigne
 			PERR("invalid arguments");
 			return -ENOMEM;
 		}
+        /*
+		scm_flush_range((uint32_t)&amsg, (uint32_t)&amsg + sizeof(htc_sec_ats_t));
+		ret = secure_access_item(0, ITEM_SEC_ATS, sizeof(htc_sec_ats_t), (unsigned char *)&amsg);
+		if (ret) {
+			PERR("ATS service fail (%d)", ret);
+			return ret;
+		}
+        */
 
 		if (copy_to_user((void __user *)arg, &amsg, sizeof(htc_sec_ats_t))) {
 			PERR("copy_to_user error (msg)");
@@ -257,6 +371,11 @@ static long htc_sdservice_ioctl(struct file *file, unsigned int command, unsigne
 			return -EFAULT;
 		}
 		PDEBUG("func = %x, sizeof htc_sec_ats_t = %zd", amsg.func_info.func_id, sizeof(htc_sec_ats_t));
+        /*
+		ret = secure_access_item(1, ITEM_SEC_ATS, sizeof(htc_sec_ats_t), (unsigned char *)&amsg);
+		if (ret)
+			PERR("ATS service fail (%d)", ret);
+         */
 		break;
 
 	default:

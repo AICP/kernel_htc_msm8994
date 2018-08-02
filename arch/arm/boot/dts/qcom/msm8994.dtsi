@@ -313,13 +313,21 @@
 			label = "audio_mem";
 		};
 
-		removed_regions: removed_regions@0 {
-			linux,reserve-contiguous-region;
-			linux,reserve-region;
-			linux,remove-completely;
-			reg = <0 0x06300000 0 0xD00000>;
-			label = "memory_hole";
-		};
+		removed_regions_1: removed_regions_1@0 {
+                        linux,reserve-contiguous-region;
+                        linux,reserve-region;
+                        linux,remove-completely;
+                        reg = <0 0x06300000 0 0x200000>;
+                        label = "memory_hole";
+                };
+
+		removed_regions_2: removed_regions_2@0 {
+                        linux,reserve-contiguous-region;
+                        linux,reserve-region;
+                        linux,remove-completely;
+                        reg = <0 0x06A00000 0 0x600000>;
+                        label = "memory_hole";
+                };
 
 		dfps_data_mem: dfps_data_mem@0 {
 			linux,reserve-contiguous-region;
@@ -1512,6 +1520,7 @@
 		qcom,set-pllbtune;
 		qcom,sleep-clk-reset;
 		qcom,vdda-force-on;
+		htc,l24-always-on = <1>;
 		clocks = <&clock_gcc clk_gcc_usb2_hs_phy_sleep_clk>;
 		clock-names = "phy_sleep_clk";
 	};
@@ -2700,6 +2709,8 @@
 	};
 
 //htc audio ++
+//Moved to msm8994-htc_XXXXX-audio.dtsi file according to different projects, XXXXX implies project name
+/*
 	i2c@f9966000 {
 		nxp_tfa9887_amp@34 {
 			compatible = "nxp,tfa9895-amp";
@@ -2718,6 +2729,7 @@
 		};
 
 	};
+*/
 //htc audio --
 
 	qcom,msm-adsp-loader {
@@ -3128,37 +3140,6 @@
 		qcom,ce-opp-freq = <171430000>;
 	};
 
-	qcom,qseecom@6500000 {
-		compatible = "qcom,qseecom";
-		reg = <0x6500000 0x500000>;
-		reg-names = "secapp-region";
-		qcom,disk-encrypt-pipe-pair = <2>;
-		qcom,file-encrypt-pipe-pair = <0>;
-		qcom,support-multiple-ce-hw-instance;
-		qcom,hlos-num-ce-hw-instances = <2>;
-		qcom,hlos-ce-hw-instance = <1 2>;
-		qcom,qsee-ce-hw-instance = <0>;
-		qcom,msm-bus,name = "qseecom-noc";
-		qcom,msm-bus,num-cases = <4>;
-		qcom,msm-bus,num-paths = <1>;
-		qcom,support-fde;
-		qcom,support-pfe;
-		qcom,no-clock-support;
-		qcom,msm-bus,vectors-KBps =
-				<55 512 0 0>,
-				<55 512 0 0>,
-				<55 512 120000 1200000>,
-				<55 512 393600 3936000>;
-		clock-names = "core_clk", "ufs_core_clk_src", "ufs_core_clk",
-			      "ufs_bus_clk", "ufs_iface_clk";
-		clocks = <&clock_rpm clk_qseecom_ce1_clk>,
-                         <&clock_gcc clk_ufs_axi_clk_src>,
-                         <&clock_gcc clk_gcc_ufs_axi_clk>,
-                         <&clock_gcc clk_gcc_sys_noc_ufs_axi_clk>,
-			 <&clock_gcc clk_gcc_ufs_ahb_clk>;
-		qcom,ce-opp-freq = <171430000>;
-	};
-
 	qcom,sensor-information {
 		compatible = "qcom,sensor-information";
 		sensor_information0: qcom,sensor-information@0 {
@@ -3291,6 +3272,11 @@
 			qcom,sensor-type =  "adc";
 			qcom,sensor-name = "battery";
 		};
+
+		sensor_information24: qcom,sensor-information-24 {
+			qcom,sensor-type =  "adc";
+			qcom,sensor-name = "hub_therm";
+		};
 	};
 
 	qcom,msm-thermal {
@@ -3352,7 +3338,7 @@
 		qcom,bcl-enable;
 		qcom,bcl-framework-interface;
 		qcom,bcl-freq-control-list = <&CPU4 &CPU5 &CPU6 &CPU7>;
-		qcom,bcl-hotplug-list = <&CPU6 &CPU7>;
+		qcom,bcl-hotplug-list = <&CPU5 &CPU7>;
 		qcom,bcl-soc-hotplug-list = <&CPU4 &CPU5 &CPU6 &CPU7>;
 		qcom,ibat-monitor {
 			qcom,low-threshold-uamp = <3400000>;

@@ -491,28 +491,28 @@ static int msm8994_read_fuse(void);
 u32 fuse_data;
 
 static const u32 vddcx_pvs_retention_data_v1[4] = {
-	 650000,
-	 400000,
-	 500000,
-	 550000
+	/* 00 */ 650000,
+	/* 01 */ 400000,
+	/* 10 */ 500000,
+	/* 11 */ 550000
 };
 
 static const u32 vddcx_pvs_retention_data_v2[8] = {
-	 650000,
-	 400000,
-	 500000,
-	 450000,
-	 550000,
-	 600000,
-	 650000,
-	 700000
+	/* 000 */ 650000,
+	/* 001 */ 400000,
+	/* 010 */ 500000,
+	/* 011 */ 450000,
+	/* 100 */ 550000,
+	/* 101 */ 600000,
+	/* 110 */ 650000,
+	/* 111 */ 700000
 };
 
 static const u32 vddmx_pvs_retention_data_v2[4] = {
-	 675000,
-	 625000,
-	 575000,
-	 725000
+	/* 00 */ 675000,
+	/* 01 */ 625000,
+	/* 10 */ 575000,
+	/* 11 */ 725000
 };
 
 static int read_cx_fuse_setting_v1(void){
@@ -649,11 +649,6 @@ static int c_show(struct seq_file *m, void *v)
 	}
 	seq_printf(m, "min_vddcx\t: %d\n", Get_min_cx());
 	seq_printf(m, "min_vddmx\t: %d\n", Get_min_mx());
-
-	if (!arch_read_hardware_id)
-		seq_printf(m, "Hardware\t: %s\n", machine_name);
-	else
-		seq_printf(m, "Hardware\t: %s\n", arch_read_hardware_id());
 
 	if (!arch_read_hardware_id)
 		seq_printf(m, "Hardware\t: %s\n", machine_name);

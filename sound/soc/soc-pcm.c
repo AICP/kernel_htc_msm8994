@@ -32,10 +32,12 @@
 #include <sound/soc-dpcm.h>
 #include <sound/initval.h>
 
+//htc audio ++
 #undef pr_info
 #undef pr_err
 #define pr_info(fmt, ...) pr_aud_info(fmt, ##__VA_ARGS__)
 #define pr_err(fmt, ...) pr_aud_err(fmt, ##__VA_ARGS__)
+//htc audio --
 
 static const struct snd_pcm_hardware no_host_hardware = {
 	.info			= SNDRV_PCM_INFO_MMAP |
@@ -1120,20 +1122,20 @@ int dpcm_be_dai_startup(struct snd_soc_pcm_runtime *fe, int stream)
 
 		if (be->dpcm[stream].users++ != 0) {
 			if(fe->dai_link->stream_name && be->dai_link->name)
-				pr_info("fe %s ref be %s users %d \n",fe->dai_link->stream_name,\
-					be->dai_link->name,be->dpcm[stream].users);
+				pr_debug("fe %s ref be %s users %d \n",fe->dai_link->stream_name,\
+					be->dai_link->name,be->dpcm[stream].users); //HTC_AUDIO
 			continue;
 		}
 
 		if(fe->dai_link->stream_name && be->dai_link->name)
-			pr_info("fe %s connec be %s users %d \n",fe->dai_link->stream_name,\
-				be->dai_link->name,be->dpcm[stream].users);
+			pr_debug("fe %s connec be %s users %d \n",fe->dai_link->stream_name,\
+				be->dai_link->name,be->dpcm[stream].users); //HTC_AUDIO
 
 		if ((be->dpcm[stream].state != SND_SOC_DPCM_STATE_NEW) &&
 		    (be->dpcm[stream].state != SND_SOC_DPCM_STATE_CLOSE))
 			continue;
 
-		pr_info("open path  %s %s %s \n", fe->dai_link->stream_name,(stream == SNDRV_PCM_STREAM_PLAYBACK)?"->":"<-",be->dai_link->name);
+		pr_debug("open path  %s %s %s \n", fe->dai_link->stream_name,(stream == SNDRV_PCM_STREAM_PLAYBACK)?"->":"<-",be->dai_link->name); //HTC_AUDIO
 
 		dev_dbg(be->dev, "ASoC: open BE %s\n", be->dai_link->name);
 
@@ -1270,20 +1272,20 @@ int dpcm_be_dai_shutdown(struct snd_soc_pcm_runtime *fe, int stream)
 
 		if (--be->dpcm[stream].users != 0) {
 			if(fe->dai_link->stream_name && be->dai_link->name)
-				pr_info("fe %s discon be %s users %d\n", fe->dai_link->stream_name,\
-					be->dai_link->name,be->dpcm[stream].users);
+				pr_debug("fe %s discon be %s users %d\n", fe->dai_link->stream_name,\
+					be->dai_link->name,be->dpcm[stream].users); //HTC_AUDIO
 			continue;
 		}
 
 		if(fe->dai_link->stream_name && be->dai_link->name)
-			pr_info("fe %s discon be %s users %d\n", fe->dai_link->stream_name,\
-				be->dai_link->name,be->dpcm[stream].users);
+			pr_debug("fe %s discon be %s users %d\n", fe->dai_link->stream_name,\
+				be->dai_link->name,be->dpcm[stream].users); //HTC_AUDIO
 
 		if ((be->dpcm[stream].state != SND_SOC_DPCM_STATE_HW_FREE) &&
 		    (be->dpcm[stream].state != SND_SOC_DPCM_STATE_OPEN))
 			continue;
 
-		pr_info("close path  %s %s %s \n", fe->dai_link->stream_name,(stream == SNDRV_PCM_STREAM_PLAYBACK)?"->":"<-",be->dai_link->name);
+		pr_debug("close path  %s %s %s \n", fe->dai_link->stream_name,(stream == SNDRV_PCM_STREAM_PLAYBACK)?"->":"<-",be->dai_link->name); //HTC_AUDIO
 
 		dev_dbg(be->dev, "ASoC: close BE %s\n",
 			dpcm->fe->dai_link->name);
@@ -1921,7 +1923,7 @@ static int dpcm_fe_dai_prepare(struct snd_pcm_substream *substream)
 				fe->dai_link->name);
 #ifdef CONFIG_HTC_DEBUG_DSP
 		pr_err("%s: trigger ramdump here to check mixer paths!", __func__);
-		
+		// BUG();
 #endif
 		ret = -EINVAL;
 		goto out;

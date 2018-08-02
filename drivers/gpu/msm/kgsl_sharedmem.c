@@ -398,10 +398,7 @@ static void kgsl_page_alloc_free(struct kgsl_memdesc *memdesc)
 	/* we certainly do not expect the hostptr to still be mapped */
 	BUG_ON(memdesc->hostptr);
 
-	if (sglen <= 0)
-		pr_warn("kgsl: Prabably pages are already freed: sglen=%d\n", sglen);
-
-	if ((sglen > 0) && memdesc->sg)
+	if (sglen && memdesc->sg)
 		for_each_sg(memdesc->sg, sg, sglen, i)
 			__free_pages(sg_page(sg), get_order(sg->length));
 

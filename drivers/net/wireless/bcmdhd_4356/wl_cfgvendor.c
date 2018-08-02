@@ -24,6 +24,10 @@
  * $Id: wl_cfgvendor.c 455257 2014-02-20 08:10:24Z $
 */
 
+/*
+ * New vendor interface additon to nl80211/cfg80211 to allow vendors
+ * to implement proprietary features over the cfg80211 stack.
+*/
 
 #include <typedefs.h>
 #include <linuxver.h>
@@ -46,7 +50,7 @@
 #include <dhd_cfg80211.h>
 #ifdef PNO_SUPPORT
 #include <dhd_pno.h>
-#endif 
+#endif /* PNO_SUPPORT */
 
 #include <proto/ethernet.h>
 #include <linux/kernel.h>
@@ -72,6 +76,12 @@
 #include <brcm_nl80211.h>
 
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(3, 13, 0)) || defined(WL_VENDOR_EXT_SUPPORT)
+/*
+ * This API is to be used for asynchronous vendor events. This
+ * shouldn't be used in response to a vendor command from its
+ * do_it handler context (instead wl_cfgvendor_send_cmd_reply should
+ * be used).
+ */
 int wl_cfgvendor_send_async_event(struct wiphy *wiphy,
 	struct net_device *dev, int event_id, const void *data, int len)
 {
@@ -80,14 +90,14 @@ int wl_cfgvendor_send_async_event(struct wiphy *wiphy,
 
 	kflags = in_atomic() ? GFP_ATOMIC : GFP_KERNEL;
 
-	
+	/* Alloc the SKB for vendor_event */
 	skb = cfg80211_vendor_event_alloc(wiphy, len, event_id, kflags);
 	if (!skb) {
 		WL_ERR(("skb alloc failed"));
 		return -ENOMEM;
 	}
 
-	
+	/* Push the data to the skb */
 	nla_put_nohdr(skb, len, data);
 
 	cfg80211_vendor_event(skb, kflags);
@@ -100,14 +110,15 @@ static int wl_cfgvendor_send_cmd_reply(struct wiphy *wiphy,
 {
 	struct sk_buff *skb;
 
-	
+	WL_ERR(("%s: Enter \n", __func__));
+	/* Alloc the SKB for vendor_event */
 	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, len);
 	if (unlikely(!skb)) {
 		WL_ERR(("skb alloc failed"));
 		return -ENOMEM;
 	}
 
-	
+	/* Push the data to the skb */
 	nla_put_nohdr(skb, len, data);
 
 	return cfg80211_vendor_cmd_reply(skb);
@@ -116,26 +127,27 @@ static int wl_cfgvendor_send_cmd_reply(struct wiphy *wiphy,
 static int wl_cfgvendor_priv_string_handler(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void *data, int len)
 {
+	static char buf[WLC_IOCTL_MAXLEN];
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	int err = 0;
 	int data_len = 0;
 
 	WL_INFORM(("%s: Enter \n", __func__));
 
-	bzero(cfg->ioctl_buf, WLC_IOCTL_MAXLEN);
+	bzero(buf, WLC_IOCTL_MAXLEN);
 
 	if (strncmp((char *)data, BRCM_VENDOR_SCMD_CAPA, strlen(BRCM_VENDOR_SCMD_CAPA)) == 0) {
 		err = wldev_iovar_getbuf(bcmcfg_to_prmry_ndev(cfg), "cap", NULL, 0,
-			cfg->ioctl_buf, WLC_IOCTL_MAXLEN, &cfg->ioctl_buf_sync);
+			buf, WLC_IOCTL_MAXLEN, NULL);
 		if (unlikely(err)) {
 			WL_ERR(("error (%d)\n", err));
 			return err;
 		}
-		data_len = strlen(cfg->ioctl_buf);
+		data_len = strlen(buf);
 	}
 
 	err =  wl_cfgvendor_send_cmd_reply(wiphy, bcmcfg_to_prmry_ndev(cfg),
-		cfg->ioctl_buf, data_len+1);
+		buf, data_len+1);
 	if (unlikely(err))
 		WL_ERR(("Vendor Command reply failed ret:%d \n", err));
 	else
@@ -151,7 +163,7 @@ static int wl_cfgvendor_priv_string_handler(struct wiphy *wiphy,
 static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void  *data, int len)
 {
-	static char iovar_buf[WLC_IOCTL_MAXLEN];
+	static char iovar_buf[WLC_IOCTL_MAXLEN], buf[WLC_IOCTL_MAXLEN];
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	int err = 0;
 	wifi_iface_stat *iface;
@@ -162,10 +174,10 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 
 	WL_INFORM(("%s: Enter \n", __func__));
 
-	bzero(cfg->ioctl_buf, WLC_IOCTL_MAXLEN);
+	bzero(buf, WLC_IOCTL_MAXLEN);
 	bzero(iovar_buf, WLC_IOCTL_MAXLEN);
 
-	output = cfg->ioctl_buf;
+	output = buf;
 	radio = (wifi_radio_stat *)output;
 
 	err = wldev_iovar_getbuf(bcmcfg_to_prmry_ndev(cfg), "radiostat", NULL, 0,
@@ -240,16 +252,20 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 	}
 	memcpy(output, iovar_buf, NUM_RATE*sizeof(wifi_rate_stat));
 
+	WL_ERR(("send cmd reply %p\n", cfg->ioctl_buf));
 	err =  wl_cfgvendor_send_cmd_reply(wiphy, bcmcfg_to_prmry_ndev(cfg),
-		cfg->ioctl_buf, sizeof(wifi_radio_stat)+NUM_CHAN*sizeof(wifi_channel_stat)+
+		buf, sizeof(wifi_radio_stat)+NUM_CHAN*sizeof(wifi_channel_stat)+
 		sizeof(wifi_iface_stat)+NUM_PEER*sizeof(wifi_peer_info)+
 		NUM_RATE*sizeof(wifi_rate_stat));
+
 	if (unlikely(err))
 		WL_ERR(("Vendor Command reply failed ret:%d \n", err));
+	else
+		WL_INFORM(("Vendor Command reply sent successfully!\n"));
 
 	return err;
 }
-#endif 
+#endif /* LINKSTAT_SUPPORT */
 
 static int wl_cfgvendor_set_country(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void  *data, int len)
@@ -308,7 +324,7 @@ static int wl_cfgvendor_gscan_get_channel_list(struct wiphy *wiphy,
 	num_channels =  reply_len/ sizeof(uint32);
 	mem_needed = reply_len + VENDOR_REPLY_OVERHEAD + (ATTRIBUTE_U32_LEN * 2);
 
-	
+	/* Alloc the SKB for vendor_event */
 	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, mem_needed);
 	if (unlikely(!skb)) {
 		WL_ERR(("skb alloc failed"));
@@ -327,7 +343,7 @@ exit:
 	kfree(reply);
 	return err;
 }
-#endif 
+#endif /* GSCAN_SUPPORT */
 
 #ifdef DEBUGABILITY_SUPPORT
 static int wl_cfgvendor_dbg_start_logging(struct wiphy *wiphy,
@@ -401,7 +417,7 @@ static int wl_cfgvendor_dbg_trigger_mem_dump(struct wiphy *wiphy,
 		WL_ERR(("failed to call dhd_os_socram_dump : %d\n", ret));
 		goto exit;
 	}
-	
+	/* Alloc the SKB for vendor_event */
 	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, 100);
 	if (!skb) {
 		WL_ERR(("skb allocation is failed\n"));
@@ -463,14 +479,14 @@ static int wl_cfgvendor_dbg_get_mem_dump(struct wiphy *wiphy,
 			WL_ERR(("failed to copy memdump into user buffer : %d\n", ret));
 			goto free_mem;
 		}
-		
+		/* Alloc the SKB for vendor_event */
 		skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, 100);
 		if (!skb) {
 			WL_ERR(("skb allocation is failed\n"));
 			ret = BCME_NOMEM;
 			goto free_mem;
 		}
-		
+		/* Indicate the memdump is succesfully copied */
 		nla_put(skb, DEBUG_ATTRIBUTE_FW_DUMP_DATA, sizeof(ret), &ret);
 
 		ret = cfg80211_vendor_cmd_reply(skb);
@@ -551,7 +567,7 @@ static int wl_cfgvendor_dbg_get_ring_status(struct wiphy *wiphy,
 			dbg_ring_status[ring_cnt++] = ring_status;
 		}
 	}
-	
+	/* Alloc the SKB for vendor_event */
 	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy,
 		(DBG_RING_STATUS_SIZE * ring_cnt) + 100);
 	if (!skb) {
@@ -637,7 +653,7 @@ static void wl_cfgvendor_dbg_ring_send_evt(void *ctx,
 	}
 	kflags = in_atomic() ? GFP_ATOMIC : GFP_KERNEL;
 	wiphy = ndev->ieee80211_ptr->wiphy;
-	
+	/* Alloc the SKB for vendor_event */
 	skb = cfg80211_vendor_event_alloc(wiphy, len + 100,
 			GOOGLE_DEBUG_RING_EVENT, kflags);
 	if (!skb) {
@@ -662,7 +678,7 @@ static void wl_cfgvendor_dbg_send_urgent_evt(void *ctx, const void *data,
 	}
 	kflags = in_atomic() ? GFP_ATOMIC : GFP_KERNEL;
 	wiphy = ndev->ieee80211_ptr->wiphy;
-	
+	/* Alloc the SKB for vendor_event */
 	skb = cfg80211_vendor_event_alloc(wiphy, len + 100,
 			GOOGLE_FW_DUMP_EVENT, kflags);
 	if (!skb) {
@@ -673,7 +689,7 @@ static void wl_cfgvendor_dbg_send_urgent_evt(void *ctx, const void *data,
 	nla_put(skb, DEBUG_ATTRIBUTE_RING_DATA, len, data);
 	cfg80211_vendor_event(skb, kflags);
 }
-#endif 
+#endif /* DEBUGABILITY_SUPPORT */
 
 static const struct wiphy_vendor_command wl_vendor_cmds [] = {
 	{
@@ -693,7 +709,7 @@ static const struct wiphy_vendor_command wl_vendor_cmds [] = {
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
 		.doit = wl_cfgvendor_lstats_get_info
 	},
-#endif 
+#endif /* LINKSTAT_SUPPORT */
 #ifdef DEBUGABILITY_SUPPORT
 	{
 		{
@@ -759,7 +775,7 @@ static const struct wiphy_vendor_command wl_vendor_cmds [] = {
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
 		.doit = wl_cfgvendor_dbg_get_feature
 	},
-#endif 
+#endif /* DEBUGABILITY_SUPPORT */
 	{
 		{
 			.vendor_id = OUI_GOOGLE,
@@ -777,7 +793,7 @@ static const struct wiphy_vendor_command wl_vendor_cmds [] = {
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
 		.doit = wl_cfgvendor_gscan_get_channel_list
 	},
-#endif 
+#endif /* GSCAN_SUPPORT */
 };
 
 static const struct  nl80211_vendor_cmd_info wl_vendor_events [] = {
@@ -815,7 +831,7 @@ int wl_cfgvendor_attach(struct wiphy *wiphy, dhd_pub_t *dhd)
 	dhd_os_dbg_register_callback(DHD_EVENT_RING_ID, wl_cfgvendor_dbg_ring_send_evt);
 	dhd_os_dbg_register_callback(NAN_EVENT_RING_ID, wl_cfgvendor_dbg_ring_send_evt);
 	dhd_os_dbg_register_urgent_notifier(dhd, wl_cfgvendor_dbg_send_urgent_evt);
-#endif 
+#endif /* DEBUGABILITY_SUPPORT */
 
 	return 0;
 }
@@ -831,4 +847,4 @@ int wl_cfgvendor_detach(struct wiphy *wiphy)
 
 	return 0;
 }
-#endif 
+#endif /* (LINUX_VERSION_CODE > KERNEL_VERSION(3, 13, 0)) || defined(WL_VENDOR_EXT_SUPPORT) */

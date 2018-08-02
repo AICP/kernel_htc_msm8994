@@ -42,6 +42,13 @@
 #include "si_mhl_callback_api.h"
 #include "si_8620_drv.h"
 
+/*
+	We choose 150 ms as the sample period due to hardware
+		taking 140 ms to distinguish between an error
+		and a disconnection.
+	We will keep the last three samples and discard
+		most recent two.
+*/
 #define LOCAL_eCBUS_ERR_SAMPLE_PERIOD 150
 
 static void si_mhl_tx_refresh_peer_devcap_entries_impl(
@@ -128,7 +135,7 @@ void init_cbus_queue(struct mhl_dev_context *dev_context)
 
 	dev_context->current_cbus_req = NULL;
 
-	
+	/* Place pre-allocated CBUS queue entries on the free list */
 	for (idx = 0; idx < NUM_CBUS_EVENT_QUEUE_EVENTS; idx++) {
 
 		entry = &dev_context->cbus_req_entries[idx];
@@ -171,13 +178,15 @@ static struct cbus_req *get_free_cbus_queue_entry_impl(
 	list_del(entry);
 	req = list_entry(entry, struct cbus_req, link);
 
-	
+	/* Start clean */
 	req->status.flags.cancel = 0;
 	req->completion = NULL;
 
 	req->function = function;
 	req->line = line;
 	req->sequence = dev_context->sequence++;
+	/*MHL_TX_DBG_ERR(,"q %d get:0x%p %s:%d\n",
+		req->sequence,req,function,line); */
 	return req;
 }
 
@@ -188,7 +197,7 @@ static void return_cbus_queue_entry_impl(struct mhl_dev_context *dev_context,
 					 struct cbus_req *pReq,
 					 const char *function, int line)
 {
-	
+	/* MHL_TX_DBG_ERR(,"q ret:0x%p %s:%d\n",pReq,function,line); */
 	list_add(&pReq->link, &dev_context->cbus_free_list);
 
 }
@@ -207,7 +216,7 @@ void queue_cbus_transaction(struct mhl_dev_context *dev_context,
 			pReq->msg_data[1] : pReq->reg_data);
 
 	list_add_tail(&pReq->link, &dev_context->cbus_queue);
-	
+	/* try to send immediately, if possible */
 	si_mhl_tx_drive_states(dev_context);
 }
 
@@ -376,7 +385,7 @@ static void return_block_queue_entry_impl(struct mhl_dev_context *dev_context,
 					  struct block_req *pReq,
 					  const char *function, int line)
 {
-	
+	/* MHL_TX_DBG_ERR(,"q ret:0x%p %s:%d\n",pReq,function,line); */
 	list_add(&pReq->link, &dev_context->block_protocol.free_list);
 
 }
@@ -412,6 +421,9 @@ void si_mhl_tx_push_block_transactions(struct mhl_dev_context *dev_context)
 	struct list_head *entry;
 	uint16_t ack_byte_count;
 
+	/*
+	   Send the requests out, starting with those in the queue
+	 */
 	ack_byte_count = hw_context->block_protocol.received_byte_count;
 	req = dev_context->block_protocol.marshalling_req;
 	if (NULL == req) {
@@ -419,9 +431,17 @@ void si_mhl_tx_push_block_transactions(struct mhl_dev_context *dev_context)
 			       ANSI_ESC_RESET_TEXT);
 		return;
 	}
-	
+	/* Need to send the unload count even if no other payload.      */
+	/* If there is no payload and 2 or less unload bytes, don't bother --
+	 * they will be unloaded with the next payload write.
+	 * This could violate the MHL3 eMSC block transfer protocol requirement
+	 * to ACK within 50ms, but it can also cause an CK feedback loop
+	 * between the two peer devices.  If the unload count is larger,
+	 * go ahead and send it even if it does cause an extra response
+	 * from the other side.
+	 */
 	if ((ack_byte_count > EMSC_BLK_STD_HDR_LEN) || req->sub_payload_size) {
-		
+		/* don't use queue_block_transaction here */
 		list_add_tail(&req->link, &dev_context->block_protocol.queue);
 		dev_context->block_protocol.marshalling_req = NULL;
 	}
@@ -440,6 +460,9 @@ void si_mhl_tx_push_block_transactions(struct mhl_dev_context *dev_context)
 
 		if (hw_context->block_protocol.peer_blk_rx_buf_avail <
 		    payload_size) {
+			/* not enough space in peer's receive buffer,
+			   so wait to send until later
+			 */
 			MHL_TX_DBG_ERR("==== not enough space in peer's "
 				"receive buffer, send later payload_size:0x%x,"
 				"blk_rx_buffer_avail:0x%lx sub-payload size:"
@@ -462,15 +485,15 @@ void si_mhl_tx_push_block_transactions(struct mhl_dev_context *dev_context)
 		req->payload->hdr_and_burst_id.tport_hdr.length_remaining =
 		    req->sub_payload_size;
 		req->count = payload_size;
-		
+		/* The driver layer will fill in the rx_unload_ack field */
 		mhl_tx_drv_send_block((struct drv_hw_context *)
 				      (&dev_context->drv_context), req);
-		
+		/* return request to free list */
 		return_block_queue_entry(dev_context, req);
 
 	}
 	if (NULL == dev_context->block_protocol.marshalling_req) {
-		
+		/* now start a new marshalling request */
 		req = start_new_block_marshalling_req(dev_context);
 		if (NULL == req) {
 			MHL_TX_DBG_ERR("%sblock free list exhausted!%s\n",
@@ -487,7 +510,13 @@ void *si_mhl_tx_get_sub_payload_buffer(struct mhl_dev_context *dev_context,
 	union emsc_payload_t *payload;
 	req = dev_context->block_protocol.marshalling_req;
 	if (NULL == req) {
-		
+		/* this can only happen if we run out of free requests */
+		/* TODO: Lee - can't call this here, because the first thing
+		 * it does is check to see if
+		 * dev_context->block_protocol.marshalling_req == NULL,
+		 * which we know it is, and if it finds NULL, it prints an
+		 * error and returns.  So why bother?
+		 */
 		si_mhl_tx_push_block_transactions(dev_context);
 		req = dev_context->block_protocol.marshalling_req;
 		if (NULL == req) {
@@ -521,6 +550,11 @@ void *si_mhl_tx_get_sub_payload_buffer(struct mhl_dev_context *dev_context,
 	return buffer;
 }
 
+/*
+ * Send the BLK_RCV_BUFFER_INFO BLOCK message.  This must be the first BLOCK
+ * message sent, but we will wait until the XDEVCAPs have been read to allow
+ * time for each side to initialize their eMSC message handling.
+ */
 
 void si_mhl_tx_send_blk_rcv_buf_info(struct mhl_dev_context *context)
 {
@@ -539,7 +573,7 @@ void si_mhl_tx_send_blk_rcv_buf_info(struct mhl_dev_context *context)
 		MHL_TX_DBG_ERR("%ssi_mhl_tx_get_sub_payload_buffer failed%s\n",
 			ANSI_ESC_RED_TEXT, ANSI_ESC_RESET_TEXT);
 	} else {
-		
+		/* next byte after blk_rcv_buf_info */
 		emsc_supp =
 			(struct SI_PACK_THIS_STRUCT MHL3_emsc_support_data_t *)
 				(buf_info + 1);
@@ -616,7 +650,7 @@ void si_mhl_tx_initialize_block_transport(struct mhl_dev_context *dev_context)
 	INIT_LIST_HEAD(&dev_context->block_protocol.queue);
 	INIT_LIST_HEAD(&dev_context->block_protocol.free_list);
 
-	
+	/* Place pre-allocated BLOCK queue entries on the free list */
 	for (idx = 0; idx < NUM_BLOCK_QUEUE_REQUESTS; idx++) {
 
 		req = &dev_context->block_protocol.req_entries[idx];
@@ -636,7 +670,7 @@ void si_mhl_tx_initialize_block_transport(struct mhl_dev_context *dev_context)
 		MHL_TX_DBG_ERR("%scheck structure packing%s\n",
 			ANSI_ESC_RED_TEXT, ANSI_ESC_RESET_TEXT);
 	}
-	
+	/* we just initialized the free list, this call cannot fail */
 	start_new_block_marshalling_req(dev_context);
 
 }
@@ -651,6 +685,10 @@ uint8_t si_get_peer_mhl_version(struct mhl_dev_context *dev_context)
 	uint8_t ret_val = dev_context->dev_cap_cache.mdc.mhl_version;
 
 	if (0 == dev_context->dev_cap_cache.mdc.mhl_version) {
+		/* If we come here it means we have not read devcap and
+		 * VERSION_STAT must have placed the version asynchronously
+		 * in peer_mhl3_version
+		 */
 		ret_val = dev_context->peer_mhl3_version;
 	}
 	return ret_val;
@@ -672,6 +710,15 @@ uint8_t calculate_generic_checksum(void *info_frame_data_parm, uint8_t checksum,
 
 static struct cbus_req *write_stat_done(struct mhl_dev_context *dev_context,
 				struct cbus_req *req, uint8_t data1);
+/*
+ * si_mhl_tx_set_status
+ *
+ * Set MHL defined STATUS bits in peer's register set.
+ *
+ * xstat    true for XSTATUS bits
+ * register	MHL register to write
+ * value	data to write to the register
+ */
 bool si_mhl_tx_set_status(struct mhl_dev_context *dev_context,
 			  bool xstat, uint8_t reg_to_write, uint8_t value)
 {
@@ -701,6 +748,13 @@ bool si_mhl_tx_set_status(struct mhl_dev_context *dev_context,
 	return true;
 }
 
+/*
+ * si_mhl_tx_send_3d_req_hawb
+ * Send SET_INT(3D_REQ) as an atomic command.
+ * completion is defined as finishing the 3D_DTD/3D_REQ
+ * This function returns true if operation was successfully performed.
+ *
+ */
 bool si_mhl_tx_send_3d_req_or_feat_req(struct mhl_dev_context *dev_context)
 {
 	struct cbus_req *req;
@@ -723,6 +777,9 @@ bool si_mhl_tx_send_3d_req_or_feat_req(struct mhl_dev_context *dev_context)
 	} else if (si_get_peer_mhl_version(dev_context) >= 0x20) {
 		req->reg_data = MHL2_INT_3D_REQ;
 	} else {
+		/* Code must not come here. This is just a trap so look
+		 * for the following message in log
+		 */
 		MHL_TX_DBG_ERR("MHL 1 does not support 3D\n");
 		return false;
 	}
@@ -732,6 +789,17 @@ bool si_mhl_tx_send_3d_req_or_feat_req(struct mhl_dev_context *dev_context)
 
 static struct cbus_req *set_int_done(struct mhl_dev_context *dev_context,
 				struct cbus_req *req, uint8_t data1);
+/*
+ * si_mhl_tx_set_int
+ * Set MHL defined INTERRUPT bits in peer's register set.
+ * This function returns true if operation was successfully performed.
+ *
+ *  regToWrite      Remote interrupt register to write
+ *  mask            the bits to write to that register
+ *
+ *  priority        0:  add to head of CBusQueue
+ *                  1:  add to tail of CBusQueue
+ */
 bool si_mhl_tx_set_int(struct mhl_dev_context *dev_context,
 		       uint8_t reg_to_write, uint8_t mask,
 		       uint8_t priority_level)
@@ -788,11 +856,17 @@ bool si_mhl_tx_send_write_burst(struct mhl_dev_context *dev_context,
 
 static void si_mhl_tx_reset_states(struct mhl_dev_context *dev_context)
 {
+	/*
+	 * Make sure that these timers do not start prematurely
+	 */
 	MHL_TX_DBG_INFO("stopping timers for DCAP_RDY and DCAP_CHG\n");
 	mhl_tx_stop_timer(dev_context, dev_context->dcap_rdy_timer);
 	mhl_tx_stop_timer(dev_context, dev_context->dcap_chg_timer);
 	mhl_tx_stop_timer(dev_context, dev_context->t_rap_max_timer);
 
+	/*
+	 * Make sure that this timer does not start prematurely
+	 */
 	MHL_TX_DBG_INFO("stopping timer for CBUS_MODE_UP\n");
 	mhl_tx_stop_timer(dev_context, dev_context->cbus_mode_up_timer);
 
@@ -806,8 +880,13 @@ static void si_mhl_tx_reset_states(struct mhl_dev_context *dev_context)
 	dev_context->status_0 = 0;
 	dev_context->status_1 = 0;
 	dev_context->link_mode = MHL_STATUS_CLK_MODE_NORMAL;
+	/* dev_context->preferred_clk_mode can be overridden by the application
+	 * calling si_mhl_tx_set_preferred_pixel_format()
+	 */
 	dev_context->preferred_clk_mode = MHL_STATUS_CLK_MODE_NORMAL;
 	{
+		/* preserve BIST role as DUT or TE over disconnection
+		*/
 		bool temp = dev_context->misc_flags.flags.bist_role_TE;
 		dev_context->misc_flags.as_uint32 = 0;
 		dev_context->misc_flags.flags.bist_role_TE = temp ? 1 : 0;
@@ -909,7 +988,7 @@ int si_mhl_tx_initialize(struct mhl_dev_context *dev_context)
 
 	si_mhl_tx_reset_states(dev_context);
 
-	
+	/* initialize CBUS_MODE_DOWN or BIST was not received */
 	dev_context->notify_disconnection = true;
 
 	dev_context->bist_setup.t_bist_mode_down = T_BIST_MODE_DOWN_MAX;
@@ -958,6 +1037,8 @@ void si_mhl_tx_bist_cleanup(struct mhl_dev_context *dev_context)
 		enum cbus_mode_e cbus_mode;
 		cbus_mode = si_mhl_tx_drv_get_cbus_mode(dev_context);
 		if (cbus_mode > CM_oCBUS_PEER_IS_MHL3) {
+			/* allow the other end some time to
+				inspect their error count registers */
 			MHL_TX_DBG_ERR("T_bist_mode_down\n")
 			si_mhl_tx_drv_switch_cbus_mode(
 			    (struct drv_hw_context *)&dev_context->drv_context,
@@ -994,7 +1075,7 @@ static void bist_timer_callback(void *callback_param)
 
 		temp = si_mhl_tx_drv_get_ecbus_bist_status(dev_context,
 			&ecbus_rx_run_done, &ecbus_tx_run_done);
-		
+		/* sample the error counter as appropriate */
 		if (dev_context->misc_flags.flags.bist_role_TE) {
 			if (BIST_TRIGGER_E_CBUS_TX & test_sel) {
 				err_cnt = temp;
@@ -1017,6 +1098,15 @@ static void bist_timer_callback(void *callback_param)
 					dev_context->bist_timeout_total);
 			;
 		} else if (si_mhl_tx_drv_ecbus_connected(dev_context)) {
+			/* accept the error count
+				 only if we're still connected
+
+				Since we can not distinguish between
+				"real" errors and errors that happen
+				as part of a disconnection, we keep track
+				of the last three results and discard the
+				two most recent.
+			*/
 			mhl_tx_start_timer(dev_context, dev_context->bist_timer,
 				LOCAL_eCBUS_ERR_SAMPLE_PERIOD);
 			dev_context->bist_stat.e_cbus_prev_local_stat =
@@ -1049,6 +1139,9 @@ static void cbus_dcap_rdy_timeout_callback(void *callback_param)
 		MHL_TX_DBG_ERR("%s%signoring lack of DCAP_RDY%s\n",
 			ANSI_ESC_RED_TEXT, ANSI_ESC_YELLOW_BG,
 			ANSI_ESC_RESET_TEXT);
+		/*
+		   Initialize registers to operate in oCBUS mode
+		 */
 		si_mhl_tx_drv_switch_cbus_mode(
 			(struct drv_hw_context *)&dev_context->drv_context,
 			CM_oCBUS_PEER_IS_MHL1_2);
@@ -1092,6 +1185,10 @@ void process_cbus_abort(struct mhl_dev_context *dev_context)
 {
 	struct cbus_req *req;
 
+	/*
+	 * Place the CBUS message that errored back on
+	 * transmit queue if it has any retries left.
+	 */
 	if (dev_context->current_cbus_req != NULL) {
 		req = dev_context->current_cbus_req;
 		dev_context->current_cbus_req = NULL;
@@ -1103,12 +1200,19 @@ void process_cbus_abort(struct mhl_dev_context *dev_context)
 		}
 	}
 
-	
+	/* Delay the sending of any new CBUS messages for 2 seconds */
 	dev_context->misc_flags.flags.cbus_abort_delay_active = true;
 
 	mhl_tx_start_timer(dev_context, dev_context->cbus_abort_timer, 2000);
 }
 
+/*
+ * si_mhl_tx_drive_states
+ *
+ * This function is called by the interrupt handler in the driver layer.
+ * to move the MSC engine to do the next thing before allowing the application
+ * to run RCP APIs.
+ */
 void si_mhl_tx_drive_states(struct mhl_dev_context *dev_context)
 {
 	struct cbus_req *req;
@@ -1118,7 +1222,7 @@ void si_mhl_tx_drive_states(struct mhl_dev_context *dev_context)
 
 	peek = peek_next_cbus_transaction(dev_context);
 	if (NULL == peek) {
-		
+		/* nothing to send */
 		return;
 	}
 	switch (si_mhl_tx_drv_get_cbus_mode(dev_context)) {
@@ -1150,9 +1254,12 @@ void si_mhl_tx_drive_states(struct mhl_dev_context *dev_context)
 		switch (req->command) {
 		case MHL_WRITE_BURST:
 			if (MHL_WRITE_BURST == peek->command) {
+				/* pending and next transactions
+				 * are both WRITE_BURST
+				 */
 				if (si_mhl_tx_drv_hawb_xfifo_avail
 					(dev_context)) {
-					
+					/* it's OK to send WRITE_BURSTs */
 					break;
 				}
 			}
@@ -1170,18 +1277,18 @@ void si_mhl_tx_drive_states(struct mhl_dev_context *dev_context)
 
 	if (MHL_WRITE_BURST != peek->command) {
 		if (si_mhl_tx_drv_get_pending_hawb_write_status(dev_context)) {
-			
+			/* hawb still pending */
 			return;
 		}
 	}
 
-	
+	/* process queued CBus transactions */
 	req = get_next_cbus_transaction(dev_context);
 	if (req == NULL)
 		return;
 
 	MHL_TX_DBG_INFO("req: %p\n", req);
-	
+	/* coordinate write burst requests and grants. */
 	if (MHL_MSC_MSG == req->command) {
 		dev_context->msc_msg_last_data = req->msg_data[1];
 	}
@@ -1207,7 +1314,7 @@ void si_mhl_tx_drive_states(struct mhl_dev_context *dev_context)
 					(struct drv_hw_context *)
 					(&dev_context->drv_context), req);
 				if (0 == ret_val) {
-					
+					/* WB XMIT level not available */
 					MHL_TX_DBG_INFO("\n");
 					break;
 				}
@@ -1215,10 +1322,10 @@ void si_mhl_tx_drive_states(struct mhl_dev_context *dev_context)
 				next_req =
 				    peek_next_cbus_transaction(dev_context);
 
-				
+				/* process queued CBus transactions */
 				if (next_req == NULL) {
 					MHL_TX_DBG_INFO("\n");
-					break;	
+					break;	/* out of the do-while loop */
 				}
 
 				if (MHL_WRITE_BURST != next_req->command) {
@@ -1301,6 +1408,12 @@ enum scratch_pad_status si_mhl_tx_request_write_burst(struct mhl_dev_context
 	return status;
 }
 
+/*
+ * si_mhl_tx_send_msc_msg
+ *
+ * This function sends a MSC_MSG command to the peer.
+ * It returns true if successful in doing so.
+ */
 bool si_mhl_tx_send_msc_msg(struct mhl_dev_context *dev_context,
 			    uint8_t command, uint8_t cmdData,
 	struct cbus_req *(*completion)(struct mhl_dev_context *dev_context,
@@ -1348,11 +1461,15 @@ struct cbus_req *rapk_done(struct mhl_dev_context *dev_context,
 		si_mhl_tx_drv_switch_cbus_mode(
 			(struct drv_hw_context *)&dev_context->drv_context,
 			CM_eCBUS_S);
-			
-			
+			/* forget state that we had CBUS_MODE_DOWN */
+			/* dev_context->notify_disconnection = true; */
 	}
 	return req;
 }
+/*
+ * si_mhl_rapk_send
+ * This function sends RAPK to the peer device.
+ */
 static bool si_mhl_rapk_send(struct mhl_dev_context *dev_context,
 			     uint8_t status)
 {
@@ -1364,9 +1481,22 @@ struct cbus_req *rcpe_done(struct mhl_dev_context *dev_context,
 				struct cbus_req *req,
 				uint8_t data1)
 {
+	/*
+	 * RCPE is always followed by an RCPK with
+	 * original key code received.
+	 */
 	si_mhl_tx_rcpk_send(dev_context, dev_context->msc_save_rcp_key_code);
 	return req;
 }
+/*
+ * si_mhl_tx_rcpe_send
+ *
+ * The function will return a value of true if it could successfully send the
+ * RCPE subcommand. Otherwise false.
+ *
+ * When successful, mhl_tx internally sends RCPK with original (last known)
+ * keycode.
+ */
 bool si_mhl_tx_rcpe_send(struct mhl_dev_context *dev_context,
 			 uint8_t rcpe_error_code)
 {
@@ -1380,12 +1510,25 @@ bool si_mhl_tx_rcpe_send(struct mhl_dev_context *dev_context,
 	return status;
 }
 
+/*
+ * si_mhl_tx_bist_setup
+ *
+ * This function sends a BIST_SETUP WRITE_BURST to the MHL3 peer.
+ * See Section 15 of the MHL3 specification
+ *
+ * This function returns the status of the command sent.
+ *
+ * This function is called only when Titan is the BIST initiator,
+ * i.e. test equipment. This function can only be called when the CBUS is
+ * in oCBUS mode. If the CBUS is in any other mode, the WRITE_BURST will not
+ * be sent to the MHL3 peer and this function will return failure.
+ */
 enum bist_cmd_status si_mhl_tx_bist_setup(struct mhl_dev_context *dev_context,
 					  struct bist_setup_info *setup)
 {
 	enum bist_cmd_status ret_status = BIST_STATUS_NO_ERROR;
 
-	
+	/* Validate current cbus mode and bist_setup_info */
 	if (si_mhl_tx_drv_get_cbus_mode(dev_context) !=
 		CM_oCBUS_PEER_IS_MHL3_BIST_SETUP) {
 		ret_status = BIST_STATUS_NOT_IN_OCBUS;
@@ -1394,7 +1537,10 @@ enum bist_cmd_status si_mhl_tx_bist_setup(struct mhl_dev_context *dev_context,
 	} else if ((setup->e_cbus_pattern == BIST_ECBUS_PATTERN_UNSPECIFIED) ||
 		(setup->e_cbus_pattern > BIST_ECBUS_PATTERN_MAX)) {
 		ret_status = BIST_STATUS_INVALID_SETUP;
-		
+		/*} if setup->e_cbus_pattern is Fixed10
+		 * with no support for eCBUS-D {
+		 */
+		/* ret_status = BIST_STATUS_INVALID_SETUP; */
 	} else
 	    if ((setup->avlink_data_rate == BIST_AVLINK_DATA_RATE_UNSPECIFIED)
 		|| (setup->avlink_pattern > BIST_AVLINK_DATA_RATE_MAX)) {
@@ -1402,14 +1548,14 @@ enum bist_cmd_status si_mhl_tx_bist_setup(struct mhl_dev_context *dev_context,
 	} else if ((setup->avlink_pattern == BIST_AVLINK_PATTERN_UNSPECIFIED) ||
 		(setup->avlink_pattern > BIST_AVLINK_PATTERN_MAX)) {
 		ret_status = BIST_STATUS_INVALID_SETUP;
-		
-		
+		/*} validate video mode { */
+		/* ret_status = BIST_STATUS_INVALID_SETUP; */
 	} else if ((setup->impedance_mode == BIST_IMPEDANCE_MODE_RESERVED_1) ||
 		(setup->impedance_mode == BIST_IMPEDANCE_MODE_RESERVED_2) ||
 		(setup->impedance_mode > BIST_IMPEDANCE_MODE_MAX)) {
 		ret_status = BIST_STATUS_INVALID_SETUP;
 	} else {
-		
+		/* Build BIST_SETUP WRITE_BURST */
 		struct bist_setup_burst burst;
 		burst.burst_id_h = HIGH_BYTE_16(burst_id_BIST_SETUP);
 		burst.burst_id_l = LOW_BYTE_16(burst_id_BIST_SETUP);
@@ -1427,12 +1573,12 @@ enum bist_cmd_status si_mhl_tx_bist_setup(struct mhl_dev_context *dev_context,
 		burst.avlink_randomizer = setup->avlink_randomizer;
 		burst.impedance_mode = setup->impedance_mode;
 
-		
+		/* calculate checksum */
 		burst.checksum =
 		    calculate_generic_checksum((uint8_t *) &burst, 0,
 					       sizeof(burst));
 
-		
+		/* Send WRITE_BURST */
 		si_mhl_tx_request_write_burst(dev_context, 0, sizeof(burst),
 					      (uint8_t *) &burst);
 		si_mhl_tx_drv_switch_cbus_mode(
@@ -1461,7 +1607,7 @@ static bool determine_bist_timeout_value(struct mhl_dev_context *dev_context)
 	uint32_t av_link_timeout = 0;
 	uint8_t test_sel;
 
-	
+	/* MHL_TX_DBG_INFO("\n"); */
 
 	test_sel = dev_context->bist_trigger_info;
 	dev_context->bist_timeout_value = 0;
@@ -1486,12 +1632,16 @@ static bool determine_bist_timeout_value(struct mhl_dev_context *dev_context)
 			if (dev_context->bist_setup.avlink_pattern <=
 			    BIST_AVLINK_PATTERN_FIXED_8) {
 				MHL_TX_DBG_INFO("\n")
-				
+				/* ~17ms. per frame */
 				av_link_timeout *= 32 * 17;
 			} else {
 				MHL_TX_DBG_INFO("\n")
 				av_link_timeout *= 1000;
 			}
+			/*
+			 * Run the test for the longer of either the
+			 * eCBUS test time or the AV_LINK test time.
+			 */
 			if (av_link_timeout > bist_timeout) {
 				MHL_TX_DBG_INFO("\n")
 				dev_context->bist_timeout_value =
@@ -1499,7 +1649,7 @@ static bool determine_bist_timeout_value(struct mhl_dev_context *dev_context)
 			}
 			if (!(test_sel & BIST_TRIGGER_ECBUS_TX_RX_MASK)) {
 				if (0 == av_link_timeout) {
-					
+					/* MHL_TX_DBG_ERR("indefinite\n") */
 					dev_context->bist_timeout_value = 0;
 				}
 			}
@@ -1507,7 +1657,7 @@ static bool determine_bist_timeout_value(struct mhl_dev_context *dev_context)
 		dev_context->bist_setup.t_bist_mode_down =
 			(dev_context->bist_timeout_value * 10)/100
 			+ T_BIST_MODE_DOWN_MIN;
-		
+		/* MHL_TX_DBG_ERR("%d\n", dev_context->bist_timeout_value) */
 	}
 	if (!dev_context->bist_timeout_value)
 		MHL_TX_DBG_ERR("No BIST timeout - wait for BIST_STOP\n");
@@ -1518,6 +1668,9 @@ struct cbus_req *bist_trigger_done(struct mhl_dev_context *dev_context,
 				struct cbus_req *req,
 				uint8_t data1)
 {
+	/* We just requested a BIST test
+	 * so now set up for it.
+	 */
 	MHL_TX_DBG_ERR("\n")
 	if (BIST_TRIGGER_IMPEDANCE_TEST == dev_context->bist_trigger_info) {
 		MHL_TX_DBG_ERR("\n")
@@ -1535,6 +1688,19 @@ struct cbus_req *bist_trigger_done(struct mhl_dev_context *dev_context,
 	}
 	return req;
 }
+/*
+ * si_mhl_tx_bist_trigger
+ *
+ * This function sends a BIST_TRIGGER MSC_MSG to the MHL3 peer.
+ * See Section 15 of the MHL3 specification
+ *
+ * This function returns the status of the command sent.
+ *
+ * This function is called only when Titan is the BIST initiator,
+ * i.e. test equipment. This function can only be called when the CBUS is
+ * in oCBUS mode. If the CBUS is in any other mode, the MSC_MSG will not
+ * be sent to the MHL3 peer and this function will return failure.
+ */
 enum bist_cmd_status si_mhl_tx_bist_trigger(struct mhl_dev_context *dev_context,
 					    uint8_t trigger_operand)
 {
@@ -1542,12 +1708,19 @@ enum bist_cmd_status si_mhl_tx_bist_trigger(struct mhl_dev_context *dev_context,
 
 	trigger_operand &= BIST_TRIGGER_OPERAND_VALID_MASK;
 
-	
+	/* Validate current cbus mode and trigger_operand */
 	if (si_mhl_tx_drv_get_cbus_mode(dev_context) !=
 		CM_oCBUS_PEER_IS_MHL3_BIST_SETUP_PEER_READY) {
 		MHL_TX_DBG_ERR("%sBIST_STATUS_NOT_IN_OCBUS%s\n",
 			ANSI_ESC_RED_TEXT, ANSI_ESC_RESET_TEXT)
 		ret_status = BIST_STATUS_DUT_NOT_READY;
+	/*} else if (trigger_operand & BIST_TRIGGER_AVLINK_TX) {
+		MHL_TX_DBG_ERR("%sBIST_STATUS_INVALID_TRIGGER%s\n",
+			ANSI_ESC_RED_TEXT, ANSI_ESC_RESET_TEXT)
+		ret_status = BIST_STATUS_INVALID_TRIGGER;
+	} else if ((trigger_operand & BIST_TRIGGER_OPERAND_SELECT_eCBUS_D) &&
+		(eCBUS_D not supported)) {
+	*/
 	} else if ((trigger_operand & BIST_TRIGGER_IMPEDANCE_TEST) &&
 		   ((trigger_operand & ~BIST_TRIGGER_IMPEDANCE_TEST) != 0x00)) {
 		MHL_TX_DBG_ERR("%sBIST_STATUS_INVALID_TRIGGER%s\n",
@@ -1556,7 +1729,7 @@ enum bist_cmd_status si_mhl_tx_bist_trigger(struct mhl_dev_context *dev_context,
 	} else {
 		dev_context->bist_trigger_info = trigger_operand;
 
-		
+		/* Send BIST_TRIGGER */
 		si_mhl_tx_send_msc_msg(dev_context, MHL_MSC_MSG_BIST_TRIGGER,
 			dev_context->bist_trigger_info, bist_trigger_done);
 		si_mhl_tx_drive_states(dev_context);
@@ -1568,18 +1741,34 @@ struct cbus_req *bist_stop_done(struct mhl_dev_context *dev_context,
 				struct cbus_req *req, uint8_t data1)
 {
 	MHL_TX_DBG_ERR("\n")
+	/* bist timer always runs, even for
+		bist_timeout_value == 0 (infinite)
+	*/
 	si_mhl_tx_bist_cleanup(dev_context);
 	return req;
 }
+/*
+ * si_mhl_tx_bist_stop
+ *
+ * This function sends a BIST_STOP MSC_MSG to the MHL3 peer.
+ * See Section 15 of the MHL3 specification
+ *
+ * This function returns the status of the command sent.
+ *
+ * This function is called only when Titan is the BIST initiator,
+ * i.e. test equipment. This function can only be called when the CBUS is
+ * in eCBUS mode. If the CBUS is in any other mode, the MSC_MSG will not
+ * be sent to the MHL3 peer and this function will return failure.
+ */
 enum bist_cmd_status si_mhl_tx_bist_stop(struct mhl_dev_context *dev_context)
 {
 	enum bist_cmd_status ret_status = BIST_STATUS_NO_ERROR;
 
-	
+	/* Validate current cbus mode */
 	if (si_mhl_tx_drv_get_cbus_mode(dev_context) < CM_eCBUS_S)
 		ret_status = BIST_STATUS_NOT_IN_ECBUS;
 
-	
+	/* Send BIST_STOP */
 	si_mhl_tx_send_msc_msg(dev_context,
 		MHL_MSC_MSG_BIST_STOP, 0x00, bist_stop_done);
 	si_mhl_tx_drive_states(dev_context);
@@ -1592,20 +1781,33 @@ struct cbus_req *bist_request_stat_done(struct mhl_dev_context *dev_context,
 	MHL_TX_DBG_ERR("\n")
 	return req;
 }
+/*
+ * si_mhl_tx_bist_request_stat
+ *
+ * This function sends a BIST_REQUEST_STAT MSC_MSG to the MHL3 peer.
+ * See Section 15 of the MHL3 specification
+ *
+ * This function returns the status of the command sent.
+ *
+ * This function is called only when Titan is the BIST initiator,
+ * i.e. test equipment. This function can only be called when the CBUS is
+ * in oCBUS mode. If the CBUS is in any other mode, the MSC_MSG will not
+ * be sent to the MHL3 peer and this function will return failure.
+ */
 enum bist_cmd_status si_mhl_tx_bist_request_stat(struct mhl_dev_context
 						 *dev_context,
 						 uint8_t request_operand)
 {
 	enum bist_cmd_status ret_status = BIST_STATUS_NO_ERROR;
 
-	
+	/* Validate current cbus mode */
 	if (si_mhl_tx_drv_get_cbus_mode(dev_context) !=
 		CM_oCBUS_PEER_IS_MHL3_BIST_STAT)
 		ret_status = BIST_STATUS_NOT_IN_OCBUS;
 
-	
+	/* verify operand 0x00 or 0x01 */
 
-	
+	/* Send BIST_REQUEST_STAT */
 	si_mhl_tx_send_msc_msg(dev_context, MHL_MSC_MSG_BIST_REQUEST_STAT,
 			       request_operand, bist_request_stat_done);
 	si_mhl_tx_drive_states(dev_context);
@@ -1661,22 +1863,22 @@ bool invalid_bist_parms(struct mhl_dev_context *dev_context,
 
 	if (BIST_TRIGGER_ECBUS_AV_LINK_MASK & test_sel) {
 		switch (setup_info->avlink_video_mode) {
-		case 4:		
+		case 4:		/* 1280 X 720 (720P) */
 			break;
-		case 3:		
+		case 3:		/* 720 X 480 (480P) */
 			break;
 		default:
 			MHL_TX_DBG_ERR("Unsupported VIC received!\n");
 			return true;
 		}
 		switch (setup_info->avlink_data_rate) {
-		case 1:		
+		case 1:		/* 1.5 Gbps */
 			MHL_TX_DBG_ERR("AV LINK_DATA_RATE 1.5Gbps\n");
 			break;
-		case 2:		
+		case 2:		/* 3.0 Gbps */
 			MHL_TX_DBG_ERR("AV LINK_DATA_RATE 3.0Gbps\n");
 			break;
-		case 3:		
+		case 3:		/* 6.0 Gbps */
 			MHL_TX_DBG_ERR("AV LINK_DATA_RATE 6.0Gbps\n");
 			break;
 		default:
@@ -1739,7 +1941,7 @@ bool invalid_bist_te_parms(struct mhl_dev_context *dev_context,
 			ANSI_ESC_RED_TEXT,
 			ANSI_ESC_RESET_TEXT,
 			test_sel)
-		
+		/* Invalid test for MHL transmitter TE */
 		dev_context->bist_stat.avlink_stat = 0xFFFF;
 		return true;
 	}
@@ -1756,7 +1958,7 @@ bool invalid_bist_dut_parms(struct mhl_dev_context *dev_context,
 		MHL_TX_DBG_ERR("\n")
 		return true;
 	} else if (test_sel & BIST_TRIGGER_AVLINK_RX) {
-		
+		/* Invalid test for MHL transmitter DUT */
 		MHL_TX_DBG_ERR("%sInvalid test:0x%02X for MHL Tx DUT%s\n",
 			ANSI_ESC_RED_TEXT,
 			test_sel,
@@ -1937,6 +2139,21 @@ void start_bist_initiator_test(struct mhl_dev_context *dev_context)
 	}
 }
 
+/*
+API for CTS tester.
+	si_mhl_tx_execute_bist
+Parameters:
+	dev_context: pointer to device context.
+	setup_info:  pointer to a structure containing
+			a complete abstraction of a BIST_SETUP
+			BURST_ID packet along with parameters
+			for BIST_TRIGGER and BIST_REQUEST_STAT and
+			a run-time adjustable value for T_BIST_MODE_DOWN
+			whose default is the maximum value of 5 seconds.
+			Parameters for BIST_SETUP are converted from the
+			abstraction to the BIST_SETUP WRITE_BURST format
+			just before sending the WRITE_BURST.
+*/
 void si_mhl_tx_execute_bist(struct mhl_dev_context *dev_context,
 			struct bist_setup_info *setup_info)
 {
@@ -1950,25 +2167,35 @@ void si_mhl_tx_execute_bist(struct mhl_dev_context *dev_context,
 			CM_oCBUS_PEER_IS_MHL3_BIST_SETUP);
 	}
 }
+/*
+ * si_mhl_tx_process_events
+ * This internal function is called at the end of interrupt processing.  It's
+ * purpose is to process events detected during the interrupt.  Some events
+ * are internally handled here but most are handled by a notification to
+ * interested applications.
+ */
 void si_mhl_tx_process_events(struct mhl_dev_context *dev_context)
 {
 	uint8_t rapk_status;
 	enum cbus_mode_e cbus_mode;
 
 	cbus_mode = si_mhl_tx_drv_get_cbus_mode(dev_context);
-	
+	/* Make sure any events detected during the interrupt are processed. */
 	si_mhl_tx_drive_states(dev_context);
 
 	if (dev_context->mhl_connection_event) {
 		MHL_TX_DBG_INFO("mhl_connection_event\n");
 
-		
+		/* Consume the message */
 		dev_context->mhl_connection_event = false;
 
+		/*
+		 * Let interested apps know about the connection state change
+		 */
 		mhl_event_notify(dev_context, dev_context->mhl_connected,
 			dev_context->dev_cap_cache.mdc.featureFlag, NULL);
 
-		
+		/* If connection has been lost, reset all state flags. */
 		if (MHL_TX_EVENT_DISCONNECTION == dev_context->mhl_connected) {
 			MHL_TX_DBG_WARN("MHL Disconnect Event. Reset states\n");
 			si_mhl_tx_reset_states(dev_context);
@@ -1977,8 +2204,18 @@ void si_mhl_tx_process_events(struct mhl_dev_context *dev_context)
 		else if (MHL_TX_EVENT_CONNECTION ==
 			dev_context->mhl_connected) {
 
+			/* queue up all three in this order to
+			   indicate MHL 3.0 version according to spec. */
 
 #ifdef FORCE_OCBUS_FOR_ECTS
+			/* This compile option is always enabled.
+			 * It is intended to help identify code deletion by
+			 * adopters who do not need this feauture. The control
+			 * for forcing oCBUS works by using module parameter
+			 * below. Peer version is forced to 2.0 allowing 8620
+			 * to treat the sink as if it is MHL 2.0 device and as
+			 * a result never switch cbus to MHL3 eCBUS.
+			 */
 			if (force_ocbus_for_ects) {
 				MHL_TX_DBG_ERR("%sQueue DCAP_RDY, DCAP_CHG%s\n",
 					       ANSI_ESC_GREEN_TEXT,
@@ -2025,9 +2262,18 @@ void si_mhl_tx_process_events(struct mhl_dev_context *dev_context)
 			si_mhl_tx_set_int(dev_context, MHL_RCHANGE_INT,
 					  MHL_INT_DCAP_CHG, 1);
 #endif
+			/*
+			 * Start timer here to circumvent issue of not getting
+			 * DCAP_RDY. Use timeout durations of 7 seconds or more
+			 * to distinguish between non-compliant dongles and the
+			 * CBUS CTS tester.
+			 */
 			switch (cbus_mode) {
 			case CM_oCBUS_PEER_VERSION_PENDING_BIST_SETUP:
 			case CM_oCBUS_PEER_VERSION_PENDING_BIST_STAT:
+				/* stop rather than start the timer
+				   for these cases
+				*/
 				mhl_tx_stop_timer(dev_context,
 					dev_context->dcap_rdy_timer);
 				mhl_tx_stop_timer(dev_context,
@@ -2044,13 +2290,19 @@ void si_mhl_tx_process_events(struct mhl_dev_context *dev_context)
 				dev_context->msc_msg_sub_command,
 				dev_context->msc_msg_data);
 
-		
+		/* Consume the message */
 		dev_context->msc_msg_arrived = false;
 
 		cbus_mode = si_mhl_tx_drv_get_cbus_mode(dev_context);
 
+		/*
+		 * Map MSG sub-command to an event ID
+		 */
 		switch (dev_context->msc_msg_sub_command) {
 		case MHL_MSC_MSG_RAP:
+			/*
+			 * RAP messages are fully handled here.
+			 */
 			if (dev_context->
 			    mhl_flags & MHL_STATE_APPLICATION_RAP_BUSY) {
 				rapk_status = MHL_RAPK_BUSY;
@@ -2061,7 +2313,7 @@ void si_mhl_tx_process_events(struct mhl_dev_context *dev_context)
 			    dev_context->msc_msg_data;
 
 			if (MHL_RAP_POLL == dev_context->msc_msg_data) {
-				
+				/* just do the ack */
 			} else if (MHL_RAP_CONTENT_ON ==
 				   dev_context->msc_msg_data) {
 				MHL_TX_DBG_ERR("Got RAP{CONTENT_ON}\n");
@@ -2085,6 +2337,10 @@ void si_mhl_tx_process_events(struct mhl_dev_context *dev_context)
 				   dev_context->msc_msg_data) {
 				MHL_TX_DBG_ERR("Got RAP{CBUS_MODE_DOWN}\n");
 
+				/* remember that we got CBUS_MODE_DOWN
+				so that we can skip notification to OTG
+				driver
+				*/
 				dev_context->notify_disconnection = false;
 			} else if (MHL_RAP_CBUS_MODE_UP ==
 				   dev_context->msc_msg_data) {
@@ -2099,7 +2355,7 @@ void si_mhl_tx_process_events(struct mhl_dev_context *dev_context)
 				rapk_status = MHL_RAPK_UNRECOGNIZED;
 			}
 
-			
+			/* Always RAPK to the peer */
 			si_mhl_rapk_send(dev_context, rapk_status);
 
 			if (rapk_status == MHL_RAPK_NO_ERR)
@@ -2110,6 +2366,10 @@ void si_mhl_tx_process_events(struct mhl_dev_context *dev_context)
 			break;
 
 		case MHL_MSC_MSG_RCP:
+			/*
+			 * If we get a RCP key that we do NOT support,
+			 * send back RCPE. Do not notify app layer.
+			 */
 			if (rcpSupportTable
 			    [dev_context->msc_msg_data & MHL_RCP_KEY_ID_MASK].
 			    rcp_support & MHL_LOGICAL_DEVICE_MAP) {
@@ -2118,7 +2378,7 @@ void si_mhl_tx_process_events(struct mhl_dev_context *dev_context)
 						 dev_context->msc_msg_data,
 						 NULL);
 			} else {
-				
+				/* Save keycode to send a RCPK after RCPE. */
 				dev_context->msc_save_rcp_key_code =
 				    dev_context->msc_msg_data;
 				si_mhl_tx_rcpe_send(dev_context,
@@ -2139,6 +2399,11 @@ void si_mhl_tx_process_events(struct mhl_dev_context *dev_context)
 			break;
 
 		case MHL_MSC_MSG_UCP:
+			/*
+			 * Save key code so that we can send an UCPE message in
+			 * case the UCP key code is rejected by the host
+			 * application.
+			 */
 			dev_context->msc_save_ucp_key_code =
 			    dev_context->msc_msg_data;
 			mhl_event_notify(dev_context, MHL_TX_EVENT_UCP_RECEIVED,
@@ -2159,6 +2424,11 @@ void si_mhl_tx_process_events(struct mhl_dev_context *dev_context)
 			break;
 #if (INCLUDE_RBP == 1)
 		case MHL_MSC_MSG_RBP:
+			/*
+			 * Save button code so that we can send an RBPE message
+			 * in case the RBP button code is rejected by the host
+			 * application.
+			 */
 			dev_context->msc_save_rbp_button_code =
 			    dev_context->msc_msg_data;
 			mhl_event_notify(dev_context, MHL_TX_EVENT_RBP_RECEIVED,
@@ -2181,6 +2451,9 @@ void si_mhl_tx_process_events(struct mhl_dev_context *dev_context)
 		case MHL_MSC_MSG_RAPK:
 			mhl_tx_stop_timer(dev_context,
 				dev_context->t_rap_max_timer);
+			/* the only RAP commands that we send are
+			 * CBUS_MODE_UP and CBUS_MODE_DOWN.
+			 */
 			if (MHL_RAP_CBUS_MODE_DOWN ==
 			    dev_context->msc_msg_last_data) {
 				MHL_TX_DBG_ERR
@@ -2208,7 +2481,7 @@ void si_mhl_tx_process_events(struct mhl_dev_context *dev_context)
 				if (MHL_RAPK_NO_ERR ==
 				    dev_context->msc_msg_data) {
 
-					
+					/* CBUS Mode switch to eCBUS */
 					si_mhl_tx_drv_switch_cbus_mode(
 						(struct drv_hw_context *)
 						&dev_context->drv_context,
@@ -2228,6 +2501,11 @@ void si_mhl_tx_process_events(struct mhl_dev_context *dev_context)
 					}
 
 				} else {
+					/*
+					 * Nothing to do for
+					 * MHL_RAPK_UNRECOGNIZED,
+					 * MHL_RAPK_UNSUPPORTED
+					 */
 				}
 
 			} else {
@@ -2235,7 +2513,7 @@ void si_mhl_tx_process_events(struct mhl_dev_context *dev_context)
 					"cmd: %02x,err_code: %02x\n",
 					dev_context->msc_msg_last_data,
 					dev_context->msc_msg_data);
-					
+					/* post status */
 					dev_context->rap_out_status =
 						dev_context->msc_msg_data;
 			}
@@ -2306,7 +2584,7 @@ void si_mhl_tx_process_events(struct mhl_dev_context *dev_context)
 					drv_context,
 					&dev_context->
 					bist_setup);
-				
+				/* initiate_bist_test(dev_context); */
 			} else if (dev_context->msc_msg_data != 0) {
 				cbus_mode = dev_context->msc_msg_data &
 					BIST_TRIGGER_TEST_E_CBUS_D ?
@@ -2334,6 +2612,9 @@ void si_mhl_tx_process_events(struct mhl_dev_context *dev_context)
 			mhl_tx_stop_timer(dev_context,
 					  dev_context->bist_timer);
 			dev_context->bist_stat.avlink_stat = 0;
+			/* bist timer always runs, even for
+				bist_timeout_value == 0 (infinite)
+			*/
 			si_mhl_tx_bist_cleanup(dev_context);
 			break;
 
@@ -2381,7 +2662,7 @@ bool si_mhl_tx_read_devcap(struct mhl_dev_context *dev_context)
 	req->retry_count = 2;
 	req->command = MHL_READ_DEVCAP;
 	req->reg = 0;
-	req->reg_data = 0;	
+	req->reg_data = 0;	/* do this to avoid confusion */
 	req->completion = read_devcap_done;
 
 	queue_cbus_transaction(dev_context, req);
@@ -2405,7 +2686,7 @@ bool si_mhl_tx_read_devcap_reg(struct mhl_dev_context *dev_context,
 	req->retry_count = 2;
 	req->command = MHL_READ_DEVCAP_REG;
 	req->reg = offset;
-	req->reg_data = 0;	
+	req->reg_data = 0;	/* do this to avoid confusion */
 
 	queue_cbus_transaction(dev_context, req);
 
@@ -2431,7 +2712,7 @@ bool si_mhl_tx_read_xdevcap_impl(struct mhl_dev_context *dev_context,
 	req->retry_count = 2;
 	req->command = MHL_READ_XDEVCAP;
 	req->reg = 0;
-	req->reg_data = 0;	
+	req->reg_data = 0;	/* do this to avoid confusion */
 	req->completion = read_xdevcap_done;
 
 	queue_cbus_transaction(dev_context, req);
@@ -2461,7 +2742,7 @@ bool si_mhl_tx_read_xdevcap_reg_impl(struct mhl_dev_context *dev_context,
 	req->retry_count = 2;
 	req->command = MHL_READ_XDEVCAP_REG;
 	req->reg = reg_addr;
-	req->reg_data = 0;	
+	req->reg_data = 0;	/* avoid confusion */
 	req->completion = read_xdevcap_reg_done;
 	queue_cbus_transaction(dev_context, req);
 
@@ -2494,6 +2775,12 @@ bool si_mhl_tx_rcpk_send(struct mhl_dev_context *dev_context,
 
 static struct cbus_req *read_edid_done(struct mhl_dev_context *dev_context,
 				struct cbus_req *req, uint8_t data1);
+/*
+ * si_mhl_tx_request_first_edid_block
+ *
+ * This function initiates a CBUS command to read the specified EDID block.
+ * Returns true if the command was queued successfully.
+ */
 void si_mhl_tx_request_first_edid_block(struct mhl_dev_context *dev_context)
 {
 	MHL_TX_DBG_INFO("tag: EDID active: %d\n",
@@ -2510,11 +2797,11 @@ void si_mhl_tx_request_first_edid_block(struct mhl_dev_context *dev_context)
 					dev_context->misc_flags.flags.
 					edid_loop_active);
 
-			
+			/* Send MHL_READ_EDID_BLOCK command */
 			req->retry_count = 2;
 			req->command = MHL_READ_EDID_BLOCK;
-			req->burst_offset = 0;	
-			req->msg_data[0] = 0;	
+			req->burst_offset = 0;	/* block number */
+			req->msg_data[0] = 0;	/* avoid confusion */
 			req->completion = read_edid_done;
 
 			queue_cbus_transaction(dev_context, req);
@@ -2524,6 +2811,9 @@ void si_mhl_tx_request_first_edid_block(struct mhl_dev_context *dev_context)
 	}
 }
 
+/*
+	si_mhl_tx_ecbus_speeds_done
+*/
 
 static void si_mhl_tx_ecbus_speeds_done(struct mhl_dev_context *dev_context)
 {
@@ -2531,6 +2821,11 @@ static void si_mhl_tx_ecbus_speeds_done(struct mhl_dev_context *dev_context)
 	    (struct drv_hw_context *)&dev_context->drv_context;
 	enum cbus_mode_e cbus_mode;
 	cbus_mode = si_mhl_tx_drv_get_cbus_mode(dev_context);
+	/*
+	 * Set default eCBUS virtual channel slot assignments
+	 * based on the capabilities of both the transmitter
+	 * and receiver.
+	 */
 	if ((dev_context->xdev_cap_cache.mxdc.ecbus_speeds &
 	     MHL_XDC_ECBUS_D_150) &&
 	    si_mhl_tx_drv_support_e_cbus_d(
@@ -2622,8 +2917,12 @@ static void si_mhl_tx_ecbus_speeds_done(struct mhl_dev_context *dev_context)
 			}
 
 			dev_context->bist_trigger_info = 0x00;
-			
+			/* fall through here to do cbus_mode_up */
 		default:
+			/* issue RAP(CBUS_MODE_UP)
+			 * RAP support is required for MHL3 and
+			 * later devices
+			 */
 			MHL_TX_DBG_WARN(
 				"%sissuing CBUS_MODE_UP%s\n",
 				ANSI_ESC_GREEN_TEXT,
@@ -2671,6 +2970,9 @@ static struct cbus_req *read_xdevcap_done(struct mhl_dev_context *dev_context,
 		&dev_context->drv_context,
 		&dev_context->xdev_cap_cache);
 
+	/*
+	 *  Generate a change mask between the old and new devcaps
+	 */
 	for (i = 0; i < XDEVCAP_OFFSET(XDEVCAP_LIMIT); ++i) {
 		xdevcap_changes.xdevcap_cache[i]
 		    = dev_context->xdev_cap_cache.xdevcap_cache[i]
@@ -2694,6 +2996,10 @@ static struct cbus_req *read_xdevcap_done(struct mhl_dev_context *dev_context,
 		MHL_TX_DBG_INFO
 		    ("mhl: XDEVCAP_ADDR_ECBUS_DEV_ROLES= %02X\n",
 		     roles);
+		/*
+		 * If sink supports HID_DEVICE,
+		 * tell it we want to be the host
+		 */
 #if (INCLUDE_HID)
 		if (roles & MHL_XDC_HID_DEVICE) {
 			MHL_TX_DBG_INFO("mhl: calling "
@@ -2729,9 +3035,17 @@ static struct cbus_req *read_devcap_done(struct mhl_dev_context *dev_context,
 		hw_context->cbus_mode = CM_oCBUS_PEER_IS_MHL1_2;
 		si_set_cbus_mode_leds(CM_oCBUS_PEER_IS_MHL1_2);
 #ifdef	FORCE_OCBUS_FOR_ECTS
+		/* This compile option is always enabled.
+		 * It is intended to help identify code deletion by
+		 * adopters who do not need this feauture. The control
+		 * for forcing oCBUS works by using module parameter
+		 * below. Peer version is forced to 2.0 allowing 8620
+		 * to treat the sink as if it is MHL 2.0 device and as
+		 * a result never switch cbus to MHL3 eCBUS.
+		 */
 		{
 			if (force_ocbus_for_ects) {
-				
+				/* todo: what if the peer is MHL 1.x? */
 				dev_context->peer_mhl3_version = 0x20;
 			}
 		}
@@ -2740,12 +3054,15 @@ static struct cbus_req *read_devcap_done(struct mhl_dev_context *dev_context,
 
 	MHL_TX_DBG_WARN("DEVCAP->MHL_VER = %02x\n",
 		       dev_context->peer_mhl3_version);
+	/*
+	 *  Generate a change mask between the old and new devcaps
+	 */
 	for (i = 0; i < sizeof(old_devcap); ++i) {
 		devcap_changes.devcap_cache[i]
 		    = dev_context->dev_cap_cache.devcap_cache[i]
 		    ^ old_devcap.devcap_cache[i];
 	}
-	
+	/* look for a change in the pow bit */
 	if (MHL_DEV_CATEGORY_POW_BIT & devcap_changes.mdc.
 	    deviceCategory) {
 		uint8_t param;
@@ -2759,15 +3076,16 @@ static struct cbus_req *read_devcap_done(struct mhl_dev_context *dev_context,
 		if (param) {
 			MHL_TX_DBG_WARN("%ssink drives VBUS%s\n",
 			ANSI_ESC_GREEN_TEXT, ANSI_ESC_RESET_TEXT);
-			
+			/* limit incoming current */
 			mhl_tx_vbus_control(VBUS_OFF);
 			mhl_tx_vbus_current_ctl(plim_table[index]);
 		} else {
 			MHL_TX_DBG_WARN("%ssource drives VBUS%s\n",
 			ANSI_ESC_YELLOW_TEXT, ANSI_ESC_RESET_TEXT);
+//			mhl_tx_vbus_control(VBUS_ON);
 		}
 
-		
+		/* Inform interested Apps of the MHL power change */
 		mhl_event_notify(dev_context, MHL_TX_EVENT_POW_BIT_CHG,
 				 param, NULL);
 #ifdef CONFIG_INTERNAL_CHARGING_SUPPORT_8620
@@ -2776,9 +3094,12 @@ static struct cbus_req *read_devcap_done(struct mhl_dev_context *dev_context,
 #endif
 	}
 
-	
+	/* indicate that the DEVCAP cache is up to date. */
 	dev_context->misc_flags.flags.have_complete_devcap = true;
 
+	/*
+	 * Check to see if any other bits besides POW_BIT have changed
+	 */
 	devcap_changes.mdc.deviceCategory &=
 		~(MHL_DEV_CATEGORY_POW_BIT | MHL_DEV_CATEGORY_PLIM2_0);
 	temp = 0;
@@ -2856,6 +3177,9 @@ static struct cbus_req *write_burst_done(struct mhl_dev_context *dev_context,
 				can_reassign = 0;
 			}
 		}
+	/* changing slot allocations may result in a loss of data; however,
+	 * the link will self-synchronize
+	 */
 		if ((can_reassign)
 		    && (0 == si_mhl_tx_drv_set_tdm_slot_allocation(
 		    (struct drv_hw_context *)&dev_context->drv_context,
@@ -2869,11 +3193,15 @@ static struct cbus_req *write_burst_done(struct mhl_dev_context *dev_context,
 		MHL_TX_DBG_ERR("%sBIST DONE%s\n",
 			ANSI_ESC_YELLOW_TEXT,
 			ANSI_ESC_RESET_TEXT)
-		
+		/* we already know that were in MHL_BIST */
 		si_mhl_tx_drv_switch_cbus_mode((struct drv_hw_context *)
 			&dev_context->drv_context,
 			CM_oCBUS_PEER_IS_MHL3);
 
+		/* issue RAP(CBUS_MODE_UP)
+		 * RAP support is required for MHL3 and
+		 * later devices
+		 */
 		MHL_TX_DBG_WARN(
 			"%sissuing CBUS_MODE_UP%s\n",
 			ANSI_ESC_GREEN_TEXT,
@@ -2913,6 +3241,15 @@ static struct cbus_req *set_int_done(struct mhl_dev_context *dev_context,
 	return req;
 }
 
+/*
+ * si_mhl_tx_msc_command_done
+ *
+ * This function is called by the driver to notify completion of last command.
+ *
+ * It is called in interrupt context to meet some MHL specified timings.
+ * Therefore, it should not call app layer and do negligible processing, no
+ * printfs.
+ */
 
 void si_mhl_tx_msc_command_done(struct mhl_dev_context *dev_context,
 				uint8_t data1)
@@ -2940,6 +3277,10 @@ void si_mhl_tx_msc_command_done(struct mhl_dev_context *dev_context,
 
 			msleep(1000);
 			MHL_TX_DBG_INFO("MSC_NAK, re-trying...\n");
+			/*
+			 * Request must be retried, so place it back
+			 * on the front of the queue.
+			 */
 			req->status.as_uint8 = 0;
 			queue_priority_cbus_transaction(dev_context, req);
 			req = NULL;
@@ -3015,6 +3356,9 @@ void si_mhl_tx_process_vc_assign_burst(struct mhl_dev_context *dev_context,
 		return;
 	}
 
+	/* The virtual channel assignment in the WRITE_BURST may contain one,
+	 * two or three channel allocations
+	 */
 	if (tdm_burst->num_entries_this_burst > 3) {
 		MHL_TX_DBG_ERR("Bad number of assignment requests in "
 			"virtual channel assign\n");
@@ -3075,7 +3419,7 @@ void si_mhl_tx_process_vc_assign_burst(struct mhl_dev_context *dev_context,
 
 	}
 
-	
+	/* Respond back to requester to indicate acceptance or rejection */
 	tdm_burst->header.burst_id.high = burst_id_VC_CONFIRM >> 8;
 	tdm_burst->header.burst_id.low = (uint8_t) burst_id_VC_CONFIRM;
 	tdm_burst->header.checksum = 0;
@@ -3085,6 +3429,8 @@ void si_mhl_tx_process_vc_assign_burst(struct mhl_dev_context *dev_context,
 
 	si_mhl_tx_request_write_burst(dev_context, 0, sizeof(*tdm_burst),
 				      (uint8_t *) (tdm_burst));
+	/* the actual assignment will occur when the
+		 write_burst is completed*/
 }
 
 void si_mhl_tx_process_vc_confirm_burst(struct mhl_dev_context *dev_context,
@@ -3184,6 +3530,10 @@ void si_mhl_tx_process_bist_setup_burst(struct mhl_dev_context *dev_context,
 	bist_setup = (struct bist_setup_burst *)write_burst_data;
 
 	dev_context->misc_flags.flags.bist_role_TE = 0;
+	/*
+	 * Validate the received BIST setup info and if it checks out
+	 * save it for use later when a BIST test is requested.
+	 */
 	tmp = calculate_generic_checksum(write_burst_data, 0,
 					 sizeof(*bist_setup));
 	if (tmp != 0) {
@@ -3284,6 +3634,10 @@ void si_mhl_tx_process_bist_setup_burst(struct mhl_dev_context *dev_context,
 			CM_oCBUS_PEER_IS_MHL3);
 	}
 
+	/*
+	 * Make sure the specified AV data rate is valid and supported by the
+	 * transmitter.
+	 */
 	if (bist_setup->avlink_data_rate == 0 ||
 	    bist_setup->avlink_data_rate > 3) {
 		MHL_TX_DBG_ERR("Invalid value 0x%02x specified in "
@@ -3329,7 +3683,7 @@ void si_mhl_tx_process_write_burst_data(struct mhl_dev_context *dev_context)
 	MHL_TX_DBG_INFO("\n");
 	cbus_mode = si_mhl_tx_drv_get_cbus_mode(dev_context);
 
-	
+	/* continue else statement to support 3D along with MDT */
 	ret_val = si_mhl_tx_drv_get_scratch_pad(
 		(struct drv_hw_context *)(&dev_context->drv_context),
 		0,
@@ -3448,6 +3802,9 @@ void si_mhl_tx_process_write_burst_data(struct mhl_dev_context *dev_context)
 				mhl_event_notify(dev_context,
 					MHL_TX_EVENT_BIST_STATUS_RECEIVED,
 					0x00, &(dev_context->bist_stat));
+				/*
+				 * BIST run completed
+				 */
 				si_mhl_tx_drv_switch_cbus_mode(
 					(struct drv_hw_context *)
 					&dev_context->drv_context,
@@ -3538,6 +3895,11 @@ void si_mhl_tx_process_write_burst_data(struct mhl_dev_context *dev_context)
 					asBytes);
 			}
 #else
+			/*
+			 * Cause a notification event to be raised to allow
+			 * interested applications a chance to process the
+			 * received write burst data.
+			 */
 			mhl_event_notify(dev_context,
 				MHL_TX_EVENT_SPAD_RECEIVED,
 				sizeof(dev_context->incoming_scratch_pad),
@@ -3586,6 +3948,11 @@ static void si_mhl_tx_refresh_peer_devcap_entries_impl(struct mhl_dev_context
 			dev_context->misc_flags.flags.
 			have_complete_devcap ? "current" : "stale");
 
+	/*
+	 * If there is a DEV CAP read operation in progress
+	 * cancel it and issue a new DEV CAP read to make sure
+	 * we pick up all the DEV CAP register changes.
+	 */
 	if (dev_context->current_cbus_req != NULL) {
 		if (dev_context->current_cbus_req->command == MHL_READ_DEVCAP) {
 			dev_context->current_cbus_req->status.flags.cancel =
@@ -3600,12 +3967,18 @@ static void si_mhl_tx_refresh_peer_devcap_entries_impl(struct mhl_dev_context
 			dev_context->dev_cap_cache.mdc.mhl_version);
 }
 
+/*
+ * si_mhl_tx_got_mhl_intr
+ *
+ * This function is called to inform of the arrival
+ * of an MHL INTERRUPT message.
+ */
 void si_mhl_tx_got_mhl_intr(struct mhl_dev_context *dev_context,
 			    uint8_t intr_0, uint8_t intr_1)
 {
 	MHL_TX_DBG_INFO("INTERRUPT Arrived. %02X, %02X\n", intr_0, intr_1);
 
-	
+	/* Handle DCAP_CHG INTR here */
 	if (MHL_INT_DCAP_CHG & intr_0) {
 		MHL_TX_DBG_WARN("got DCAP_CHG stopping timer...\n");
 		mhl_tx_stop_timer(dev_context, dev_context->dcap_chg_timer);
@@ -3627,33 +4000,37 @@ void si_mhl_tx_got_mhl_intr(struct mhl_dev_context *dev_context,
 	}
 
 	if (MHL_INT_DSCR_CHG & intr_0) {
-		
+		/* remote WRITE_BURST is complete */
 		dev_context->misc_flags.flags.rcv_scratchpad_busy = false;
 		si_mhl_tx_process_write_burst_data(dev_context);
 	}
 
 	if (MHL_INT_REQ_WRT & intr_0) {
-		
+		/* Scratch pad write request from the sink device. */
 		if (dev_context->misc_flags.flags.rcv_scratchpad_busy) {
+			/*
+			 * Use priority 1 to defer sending grant until
+			 * local traffic is done
+			 */
 			si_mhl_tx_set_int(dev_context, MHL_RCHANGE_INT,
 					  MHL_INT_GRT_WRT, 1);
 		} else {
-			
+			/* use priority 0 to respond immediately */
 			si_mhl_tx_set_int(dev_context, MHL_RCHANGE_INT,
 					  MHL_INT_GRT_WRT, 0);
 		}
 	}
 
 	if (MHL3_INT_FEAT_REQ & intr_0) {
-		
+		/* Send write bursts for all features that we support */
 
 		struct MHL3_emsc_support_data_t emsc_support = {
 			{ENCODE_BURST_ID(burst_id_EMSC_SUPPORT),
-			 0,	
-			 1,	
-			 1	
+			 0,	/* checksum  starts at 0 */
+			 1,	/* total entries */
+			 1	/* sequence id */
 			 },
-			1,	
+			1,	/* num entries this burst */
 			    {
 			       {
 				ENCODE_BURST_ID(burst_id_HID_PAYLOAD),
@@ -3667,12 +4044,12 @@ void si_mhl_tx_got_mhl_intr(struct mhl_dev_context *dev_context,
 		struct MHL3_adt_data_t adt_burst = {
 			{
 			 ENCODE_BURST_ID(burst_id_ADT_BURSTID),
-			 0,	
-			 1,	
-			 1	
+			 0,	/* checksum  starts at 0 */
+			 1,	/* total entries */
+			 1	/* sequence id */
 			 },
 			{
-			   0,	
+			   0,	/* format flags */
 			   .descriptors = {
 				.short_descs = {0, 0, 0, 0, 0, 0, 0, 0, 0}
 #if 0
@@ -3694,7 +4071,7 @@ void si_mhl_tx_got_mhl_intr(struct mhl_dev_context *dev_context,
 		    calculate_generic_checksum((uint8_t *) &adt_burst, 0,
 					       sizeof(adt_burst));
 
-		
+		/* Step 6: Store HEV_VIC in Burst Out-Queue. */
 		if (false ==
 		    si_mhl_tx_send_write_burst(dev_context, &emsc_support)) {
 			MHL_TX_DBG_ERR("%scbus queue flooded%s\n",
@@ -3705,12 +4082,15 @@ void si_mhl_tx_got_mhl_intr(struct mhl_dev_context *dev_context,
 			MHL_TX_DBG_ERR("%scbus queue flooded%s\n",
 				       ANSI_ESC_RED_TEXT, ANSI_ESC_RESET_TEXT);
 		}
-		
+		/* send with normal priority */
 		si_mhl_tx_set_int(dev_context, MHL_RCHANGE_INT,
 				  MHL3_INT_FEAT_COMPLETE, 1);
 	}
 
 	if (MHL3_INT_FEAT_COMPLETE & intr_0) {
+		/* sink is finished sending write bursts in response to
+		 * MHL3_INT_FEAT_REQ
+		 */
 		si_mhl_tx_display_timing_enumeration_end(dev_context->
 							 edid_parser_context);
 	}
@@ -3730,9 +4110,12 @@ void si_mhl_tx_got_mhl_intr(struct mhl_dev_context *dev_context,
 	}
 }
 
+/*
+ * si_si_mhl_tx_check_av_link_status
+ */
 static void si_mhl_tx_check_av_link_status(struct mhl_dev_context *dev_context)
 {
-	
+	/* is TMDS normal */
 	if (MHL_XDS_LINK_STATUS_TMDS_NORMAL & dev_context->xstatus_1) {
 		MHL_TX_DBG_WARN("AV LINK_MODE_STATUS is NORMAL.\n");
 		if (dev_context->misc_flags.flags.edid_loop_active) {
@@ -3750,6 +4133,11 @@ static void si_mhl_tx_check_av_link_status(struct mhl_dev_context *dev_context)
 	}
 }
 
+/*
+ * si_mhl_tx_got_mhl_status
+ *
+ * This function is called by the driver to inform of arrival of a MHL STATUS.
+ */
 void si_mhl_tx_got_mhl_status(struct mhl_dev_context *dev_context,
 			      struct mhl_device_status *dev_status)
 {
@@ -3764,6 +4152,9 @@ void si_mhl_tx_got_mhl_status(struct mhl_dev_context *dev_context,
 	     dev_status->write_stat[2], dev_status->write_xstat[0],
 	     dev_status->write_xstat[1], dev_status->write_xstat[2],
 	     dev_status->write_xstat[3]);
+	/*
+	 * Handle DCAP_RDY STATUS here itself
+	 */
 	status_change_bit_mask_0 =
 	    dev_status->write_stat[0] ^ dev_context->status_0;
 	status_change_bit_mask_1 =
@@ -3773,6 +4164,10 @@ void si_mhl_tx_got_mhl_status(struct mhl_dev_context *dev_context,
 	xstatus_change_bit_mask_3 =
 	    dev_status->write_xstat[3] ^ dev_context->xstatus_3;
 
+	/*
+	 * Remember the event.   (other code checks the saved values,
+	 * so save the values early, but not before the XOR operations above)
+	 */
 	dev_context->status_0 = dev_status->write_stat[0];
 	dev_context->status_1 = dev_status->write_stat[1];
 	dev_context->xstatus_1 = dev_status->write_xstat[1];
@@ -3800,14 +4195,14 @@ void si_mhl_tx_got_mhl_status(struct mhl_dev_context *dev_context,
 			}
 			mhl_tx_stop_timer(dev_context,
 				dev_context->dcap_rdy_timer);
-			
+			/* some dongles send DCAP_RDY, but not DCAP_CHG */
 			mhl_tx_start_timer(dev_context,
 				dev_context->dcap_chg_timer, 2000);
 			if (si_mhl_tx_drv_connection_is_mhl3(dev_context))
 				MHL_TX_DBG_WARN("waiting for DCAP_CHG\n");
 		}
 	}
-	
+	/* look for a change in the pow bit */
 	if (MHL_STATUS_POW_STAT & status_change_bit_mask_0) {
 		uint8_t sink_drives_vbus =
 		    (MHL_STATUS_POW_STAT & dev_status->write_stat[0]);
@@ -3820,9 +4215,15 @@ void si_mhl_tx_got_mhl_status(struct mhl_dev_context *dev_context,
 			index &= MHL_STATUS_PLIM_STAT_MASK;
 			index >>= 3;
 			param = MHL_DEV_CATEGORY_POW_BIT;
+			/*
+			 * Since downstream device is supplying VBUS power,
+			 * turn off our VBUS power here. If the platform
+			 * application can control VBUS power it should turn
+			 * off it's VBUS power now.
+			 */
 			MHL_TX_DBG_WARN("%ssink drives VBUS%s\n",
 				ANSI_ESC_GREEN_TEXT, ANSI_ESC_RESET_TEXT);
-			
+			/* limit incoming current */
 			mhl_tx_vbus_control(VBUS_OFF);
 			mhl_tx_vbus_current_ctl(plim_table[index]);
 #ifdef CONFIG_INTERNAL_CHARGING_SUPPORT_8620
@@ -3833,17 +4234,21 @@ void si_mhl_tx_got_mhl_status(struct mhl_dev_context *dev_context,
 			MHL_TX_DBG_WARN("%ssource drives VBUS"
 				" according to PLIM_STAT%s\n",
 			ANSI_ESC_YELLOW_TEXT, ANSI_ESC_RESET_TEXT);
-			
+			/* limit outgoing current */
+//			mhl_tx_vbus_control(VBUS_ON);
 		}
+		/* we only get POW_STAT if the sink is MHL3 or newer,
+		 * so update the POW bit
+		 */
 		dev_context->dev_cap_cache.mdc.deviceCategory &=
 		    ~MHL_DEV_CATEGORY_POW_BIT;
 		dev_context->dev_cap_cache.mdc.deviceCategory |= param;
-		
+		/* Inform interested Apps of the MHL power change */
 		mhl_event_notify(dev_context, MHL_TX_EVENT_POW_BIT_CHG,
 				 param, NULL);
 	}
 
-	
+	/* did PATH_EN change? */
 	if (MHL_STATUS_PATH_ENABLED & status_change_bit_mask_1) {
 		MHL_TX_DBG_INFO("PATH_EN changed\n");
 		if (MHL_STATUS_PATH_ENABLED & dev_status->write_stat[1])
@@ -3864,6 +4269,14 @@ struct cbus_req *rcp_done(struct mhl_dev_context *dev_context,
 	MHL_TX_DBG_ERR("\n")
 	return req;
 }
+/*
+ * si_mhl_tx_rcp_send
+ *
+ * This function checks if the peer device supports RCP and sends rcpKeyCode.
+ * The function will return a value of true if it could successfully send the
+ * RCP subcommand and the key code. Otherwise false.
+ *
+ */
 bool si_mhl_tx_rcp_send(struct mhl_dev_context *dev_context,
 	uint8_t rcpKeyCode)
 {
@@ -3871,6 +4284,9 @@ bool si_mhl_tx_rcp_send(struct mhl_dev_context *dev_context,
 
 	MHL_TX_DBG_INFO("called\n");
 
+	/*
+	 * Make sure peer supports RCP
+	 */
 	if (dev_context->dev_cap_cache.mdc.featureFlag &
 	     MHL_FEATURE_RCP_SUPPORT) {
 
@@ -3894,12 +4310,24 @@ struct cbus_req *ucp_done(struct mhl_dev_context *dev_context,
 	return req;
 }
 
+/*
+ * si_mhl_tx_ucp_send
+ *
+ * This function is (indirectly) called by a host application to send
+ * a UCP key code to the downstream device.
+ *
+ * Returns true if the key code can be sent, false otherwise.
+ */
 bool si_mhl_tx_ucp_send(struct mhl_dev_context *dev_context,
 			uint8_t ucp_key_code)
 {
 	bool status;
 	MHL_TX_DBG_INFO("called key code: 0x%02x\n", ucp_key_code);
 
+	/*
+	 * Make sure peer supports UCP and that the connection is
+	 * in a state where a UCP message can be sent.
+	 */
 	if (dev_context->dev_cap_cache.mdc.featureFlag &
 	     MHL_FEATURE_UCP_RECV_SUPPORT) {
 
@@ -3921,6 +4349,14 @@ struct cbus_req *ucpk_done(struct mhl_dev_context *dev_context,
 
 	return req;
 }
+/*
+ * si_mhl_tx_ucp_send
+ *
+ * This function is (indirectly) called by a host application to send
+ * a UCP acknowledge message for a received UCP key code message.
+ *
+ * Returns true if the message can be sent, false otherwise.
+ */
 bool si_mhl_tx_ucpk_send(struct mhl_dev_context *dev_context,
 			 uint8_t ucp_key_code)
 {
@@ -3936,9 +4372,24 @@ struct cbus_req *ucpe_done(struct mhl_dev_context *dev_context,
 				struct cbus_req *req, uint8_t data1)
 {
 	MHL_TX_DBG_ERR("\n")
+	/*
+	 * UCPE is always followed by an UCPK with
+	 * original key code received.
+	 */
 	si_mhl_tx_ucpk_send(dev_context, dev_context->msc_save_ucp_key_code);
 	return req;
 }
+/*
+ * si_mhl_tx_ucpe_send
+ *
+ * This function is (indirectly) called by a host application to send a
+ * UCP negative acknowledgment message for a received UCP key code message.
+ *
+ * Returns true if the message can be sent, false otherwise.
+ *
+ * When successful, mhl_tx internally sends UCPK with original (last known)
+ * UCP keycode.
+ */
 bool si_mhl_tx_ucpe_send(struct mhl_dev_context *dev_context,
 			 uint8_t ucpe_error_code)
 {
@@ -3956,6 +4407,14 @@ struct cbus_req *rbp_done(struct mhl_dev_context *dev_context,
 	return req;
 }
 
+/*
+ * si_mhl_tx_rbp_send
+ *
+ * This function checks if the peer device supports RBP and sends rbpButtonCode.
+ * The function will return a value of true if it could successfully send the
+ * RBP subcommand and the button code. Otherwise false.
+ *
+ */
 bool si_mhl_tx_rbp_send(struct mhl_dev_context *dev_context,
 	uint8_t rbpButtonCode)
 {
@@ -3963,6 +4422,9 @@ bool si_mhl_tx_rbp_send(struct mhl_dev_context *dev_context,
 
 	MHL_TX_DBG_INFO("called\n");
 
+	/*
+	 * Make sure peer supports RBP
+	 */
 	if (dev_context->dev_cap_cache.mdc.featureFlag &
 	     MHL_FEATURE_RBP_SUPPORT) {
 
@@ -3986,6 +4448,14 @@ struct cbus_req *rbpk_done(struct mhl_dev_context *dev_context,
 	MHL_TX_DBG_ERR("\n")
 	return req;
 }
+/*
+ * si_mhl_tx_rbpk_send
+ *
+ * This function is (indirectly) called by a host application to send
+ * a RBP acknowledge message for a received RBP button code message.
+ *
+ * Returns true if the message can be sent, false otherwise.
+ */
 bool si_mhl_tx_rbpk_send(struct mhl_dev_context *dev_context,
 			 uint8_t rbp_button_code)
 {
@@ -4002,10 +4472,23 @@ bool si_mhl_tx_rbpk_send(struct mhl_dev_context *dev_context,
 struct cbus_req *rbpe_done(struct mhl_dev_context *dev_context,
 				struct cbus_req *req, uint8_t data1)
 {
+	/*
+	 * RBPE is always followed by an RBPK with
+	 * original button code received.
+	 */
 	MHL_TX_DBG_ERR("\n")
 	si_mhl_tx_rbpk_send(dev_context, dev_context->msc_save_rbp_button_code);
 	return req;
 }
+/*
+ * si_mhl_tx_rbpe_send
+ *
+ * The function will return a value of true if it could successfully send the
+ * RBPE subcommand. Otherwise false.
+ *
+ * When successful, mhl_tx internally sends RBPK with original (last known)
+ * button code.
+ */
 bool si_mhl_tx_rbpe_send(struct mhl_dev_context *dev_context,
 			 uint8_t rbpe_error_code)
 {
@@ -4038,9 +4521,25 @@ struct cbus_req *rap_done(struct mhl_dev_context *dev_context,
 				struct cbus_req *req, uint8_t data1)
 {
 	MHL_TX_DBG_WARN("\n")
+	/* the only RAP commands that we send are
+	 * CBUS_MODE_UP AND CBUS_MODE_DOWN.
+	 */
+	/*
+	if (MHL_RAP_CBUS_MODE_DOWN == dev_context->msc_msg_last_data) {
+	} else if (MHL_RAP_CBUS_MODE_UP == dev_context->msc_msg_last_data) {
+	}
+	*/
 	return req;
 }
 
+/*
+ * si_mhl_tx_rap_send
+ *
+ * This function sends the requested RAP action code message if RAP
+ * is supported by the downstream device.
+ *
+ * The function returns true if the message can be sent, false otherwise.
+ */
 bool si_mhl_tx_rap_send(struct mhl_dev_context *dev_context,
 			uint8_t rap_action_code)
 {
@@ -4050,7 +4549,15 @@ bool si_mhl_tx_rap_send(struct mhl_dev_context *dev_context,
 		rap_strings_high[(rap_action_code>>4)&3],
 		rap_strings_low[(rap_action_code>>4)&3][rap_action_code & 1],
 		ANSI_ESC_RESET_TEXT);
+	/*
+	 * Make sure peer supports RAP and that the connection is
+	 * in a state where a RAP message can be sent.
+	 */
 	if (si_get_peer_mhl_version(dev_context) >= 0x30) {
+		/*
+		 * MHL3.0 Requires RAP support,
+		 * no need to check if sink is MHL 3.0
+		 */
 
 		status = si_mhl_tx_send_msc_msg(dev_context, MHL_MSC_MSG_RAP,
 						rap_action_code, rap_done);
@@ -4072,6 +4579,13 @@ bool si_mhl_tx_rap_send(struct mhl_dev_context *dev_context,
 	return status;
 }
 
+/*
+ * si_mhl_tx_notify_downstream_hpd_change
+ *
+ * Handle the arrival of SET_HPD or CLEAR_HPD messages.
+ *
+ * Turn the content off or on based on what we got.
+ */
 void si_mhl_tx_notify_downstream_hpd_change(struct mhl_dev_context *dev_context,
 					    uint8_t downstream_hpd)
 {
@@ -4098,8 +4612,12 @@ void si_mhl_tx_notify_downstream_hpd_change(struct mhl_dev_context *dev_context,
 	} else {
 		dev_context->misc_flags.flags.mhl_hpd = true;
 
+		/*
+		 *  possible EDID read is complete here
+		 *  see MHL spec section 5.9.1
+		 */
 		if (dev_context->misc_flags.flags.have_complete_devcap) {
-			
+			/* Devcap refresh is complete */
 			MHL_TX_DBG_INFO("tag:\n");
 			si_mhl_tx_initiate_edid_sequence(
 					dev_context->edid_parser_context);
@@ -4107,11 +4625,21 @@ void si_mhl_tx_notify_downstream_hpd_change(struct mhl_dev_context *dev_context,
 	}
 }
 
+/*
+ *	si_mhl_tx_get_peer_dev_cap_entry
+ *
+ *	index -- the devcap index to get
+ *	*data pointer to location to write data
+ *
+ *	returns
+ *		0 -- success
+ *		1 -- busy.
+ */
 uint8_t si_mhl_tx_get_peer_dev_cap_entry(struct mhl_dev_context *dev_context,
 					 uint8_t index, uint8_t *data)
 {
 	if (!dev_context->misc_flags.flags.have_complete_devcap) {
-		
+		/* update is in progress */
 		return 1;
 	} else {
 		*data = dev_context->dev_cap_cache.devcap_cache[index];
@@ -4119,6 +4647,19 @@ uint8_t si_mhl_tx_get_peer_dev_cap_entry(struct mhl_dev_context *dev_context,
 	}
 }
 
+/*
+ * si_get_scratch_pad_vector
+ *
+ * offset
+ *	The beginning offset into the scratch pad from which to fetch entries.
+ * length
+ *	The number of entries to fetch
+ * *data
+ *	A pointer to an array of bytes where the data should be placed.
+ *
+ * returns:
+ *	scratch_pad_status see si_mhl_tx_api.h for details
+*/
 enum scratch_pad_status si_get_scratch_pad_vector(struct mhl_dev_context
 						  *dev_context, uint8_t offset,
 						  uint8_t length,
@@ -4196,7 +4737,7 @@ int si_mhl_tx_shutdown(struct mhl_dev_context *dev_context)
 int si_mhl_tx_ecbus_started(struct mhl_dev_context *dev_context)
 {
 	MHL_TX_DBG_INFO("eCBUS started\n");
-	
+	/* queue up both of these */
 	si_mhl_tx_read_xdevcap(dev_context);
 	return 0;
 }

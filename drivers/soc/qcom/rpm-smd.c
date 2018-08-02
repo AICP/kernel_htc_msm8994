@@ -41,6 +41,7 @@
 #include <trace/events/trace_rpm_smd.h>
 
 #include "smd_private.h"
+/* Debug Definitions */
 enum {
 	MSM_RPM_LOG_REQUEST_PRETTY	= BIT(0),
 	MSM_RPM_LOG_REQUEST_RAW		= BIT(1),
@@ -1260,16 +1261,16 @@ int msm_rpm_wait_for_ack_handle(struct msm_rpm_wait_data *elem)
 		remain = wait_for_completion_timeout(&elem->ack, msecs_to_jiffies(SMD_CHANNEL_NOTIF_TIMEOUT));
 		rt_mutex_unlock(&msm_rpm_smd_lock);
 
-		
+		/* For timeout case, try to recover it or print warning and dump channel data, then let it go with TIMEOUT error. */
 		if (0 == remain) {
 
-			
+			/* Even polling does not work, leave debug messages. */
 			if (retry == 0) {
 				unsigned long flags;
 
 				WARN(1, "max %u msecs timeout for waiting msg rpm ack of msg %u.\n",
 						SMD_CHANNEL_NOTIF_TIMEOUT * MAX_MSM_RPM_WAIT_RETRY, elem->msg_id);
-				
+				/* Dump SMD channel data to check details */
 				msm_rpm_dump_channel_data(msm_rpm_data.ch_info);
 
 				local_irq_save(flags);
@@ -1278,7 +1279,7 @@ int msm_rpm_wait_for_ack_handle(struct msm_rpm_wait_data *elem)
 
 				panic("Cannot process RPM acknowledge message normally.\n");
 			}
-			
+			/* Poll smd channel actively. */
 			else {
 				int smd_irq;
 				struct irq_chip *smd_irq_chip;
@@ -1311,7 +1312,7 @@ int msm_rpm_wait_for_ack_handle(struct msm_rpm_wait_data *elem)
 					}
 				}
 
-				
+				/* Dump SMD channel data to check details */
 				msm_rpm_dump_channel_data(msm_rpm_data.ch_info);
 
 				if (smd_is_pkt_avail(msm_rpm_data.ch_info))

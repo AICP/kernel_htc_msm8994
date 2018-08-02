@@ -65,6 +65,10 @@ s32 wldev_ioctl(
 	return ret;
 }
 
+/* Format a iovar buffer, not bsscfg indexed. The bsscfg index will be
+ * taken care of in dhd_ioctl_entry. Internal use only, not exposed to
+ * wl_iw, wl_cfg80211 and wl_cfgp2p
+ */
 static s32 wldev_mkiovar(
 	s8 *iovar_name, s8 *param, s32 paramlen,
 	s8 *iovar_buf, u32 buflen)
@@ -140,6 +144,10 @@ s32 wldev_iovar_getint(
 	return err;
 }
 
+/** Format a bsscfg indexed iovar buffer. The bsscfg index will be
+ *  taken care of in dhd_ioctl_entry. Internal use only, not exposed to
+ *  wl_iw, wl_cfg80211 and wl_cfgp2p
+ */
 s32 wldev_mkiovar_bsscfg(
 	const s8 *iovar_name, s8 *param, s32 paramlen,
 	s8 *iovar_buf, s32 buflen, s32 bssidx)
@@ -155,8 +163,8 @@ s32 wldev_mkiovar_bsscfg(
 			(s8 *) iovar_buf, buflen);
 	}
 
-	prefixlen = (u32) strlen(prefix); 
-	namelen = (u32) strlen(iovar_name) + 1; 
+	prefixlen = (u32) strlen(prefix); /* lengh of bsscfg prefix */
+	namelen = (u32) strlen(iovar_name) + 1; /* lengh of iovar  name + null */
 	iolen = prefixlen + namelen + sizeof(u32) + paramlen;
 
 	if (buflen < 0 || iolen > (u32)buflen)
@@ -167,20 +175,20 @@ s32 wldev_mkiovar_bsscfg(
 
 	p = (s8 *)iovar_buf;
 
-	
+	/* copy prefix, no null */
 	memcpy(p, prefix, prefixlen);
 	p += prefixlen;
 
-	
+	/* copy iovar name including null */
 	memcpy(p, iovar_name, namelen);
 	p += namelen;
 
-	
+	/* bss config index as first param */
 	bssidx = htod32(bssidx);
 	memcpy(p, &bssidx, sizeof(u32));
 	p += sizeof(u32);
 
-	
+	/* parameter buffer follows */
 	if (paramlen)
 		memcpy(p, param, paramlen);
 
@@ -268,7 +276,7 @@ int wldev_get_link_speed(
 	if (unlikely(error))
 		return error;
 
-	
+	/* Convert internal 500Kbps to Kbps */
 	*plink_speed *= 500;
 	return error;
 }
@@ -334,7 +342,7 @@ int wldev_set_country(
 	wl_country_t cspec = {{0}, 0, {0}};
 #ifdef CUSTOMER_HW_ONE
 	wl_country_t cspec_fw = {{0}, 0, {0}};
-#endif 
+#endif /* CUSTOMER_HW_ONE */
 	scb_val_t scbval;
 	char smbuf[WLC_IOCTL_SMLEN];
 
@@ -346,7 +354,7 @@ int wldev_set_country(
 	error = wldev_iovar_getbuf(dev, "country", NULL, 0, &cspec_fw, sizeof(cspec_fw), NULL);
 #else
 	error = wldev_iovar_getbuf(dev, "country", NULL, 0, &cspec, sizeof(cspec), NULL);
-#endif 
+#endif /* CUSTOMER_HW_ONE */
 	if (error < 0) {
 		WLDEV_ERROR(("%s: get country failed = %d\n", __FUNCTION__, error));
 		return error;
@@ -363,7 +371,7 @@ int wldev_set_country(
 #else
 	if ((error < 0) ||
 	    (strncmp(country_code, cspec.country_abbrev, WLC_CNTRY_BUF_SZ) != 0)) {
-#endif 
+#endif /* CUSTOMER_HW_ONE */
 		if (user_enforced) {
 			bzero(&scbval, sizeof(scb_val_t));
 			error = wldev_ioctl(dev, WLC_DISASSOC, &scbval, sizeof(scb_val_t), true);
@@ -372,7 +380,7 @@ int wldev_set_country(
 					__FUNCTION__, error));
 #ifndef CUSTOMER_HW_ONE
 				return error;
-#endif 
+#endif /* CUSTOMER_HW_ONE */
 			}
 		}
 
@@ -381,14 +389,14 @@ int wldev_set_country(
 		memcpy(cspec.country_abbrev, country_code, WLC_CNTRY_BUF_SZ);
 		memcpy(cspec.ccode, country_code, WLC_CNTRY_BUF_SZ);
 		dhd_get_customized_country_code(dev, (char *)&cspec.country_abbrev, &cspec);
-#endif 
+#endif /* CUSTOMER_HW_ONE */
 		error = wldev_iovar_setbuf(dev, "country", &cspec, sizeof(cspec),
 			smbuf, sizeof(smbuf), NULL);
 		if (error < 0) {
 			WLDEV_ERROR(("%s: set country for %s as %s/%d failed\n",
 				__FUNCTION__, country_code, cspec.ccode, cspec.rev));
 #ifdef CUSTOMER_HW_ONE
-			
+			/* try again per customer request... */
 			error = wldev_iovar_setbuf(dev, "country", &cspec, sizeof(cspec),
 				smbuf, sizeof(smbuf), NULL);
 			if (error < 0) {
@@ -401,7 +409,7 @@ int wldev_set_country(
 			}
 #else
 			return error;
-#endif 
+#endif /* CUSTOMER_HW_ONE */
 
 		}
 		dhd_bus_country_set(dev, &cspec, notify);
@@ -412,6 +420,7 @@ int wldev_set_country(
 }
 
 #if defined(CUSTOM_PLATFORM_NV_TEGRA)
+/* tuning performance for miracast */
 int wldev_miracast_tuning(
 	struct net_device *dev, char *command, int total_len)
 {
@@ -422,7 +431,7 @@ int wldev_miracast_tuning(
 #ifdef VSDB_BW_ALLOCATE_ENABLE
 	int mchan_algo;
 	int mchan_bw;
-#endif 
+#endif /* VSDB_BW_ALLOCATE_ENABLE */
 
 	if (sscanf(command, "%*s %d", &mode) != 1) {
 		WLDEV_ERROR(("Failed to get mode\n"));
@@ -432,46 +441,46 @@ int wldev_miracast_tuning(
 	WLDEV_ERROR(("mode: %d\n", mode));
 
 	if (mode == 0) {
-		
-		ampdu_mpdu = -1;	
+		/* Normal mode: restore everything to default */
+		ampdu_mpdu = -1;	/* FW default */
 #if defined(ROAM_ENABLE)
-		roam_off = 0;	
+		roam_off = 0;	/* roam enable */
 #elif defined(DISABLE_BUILTIN_ROAM)
-		roam_off = 1;	
+		roam_off = 1;	/* roam disable */
 #endif
 #ifdef VSDB_BW_ALLOCATE_ENABLE
-		mchan_algo = 0;	
-		mchan_bw = 50;	
-#endif 
+		mchan_algo = 0;	/* Default */
+		mchan_bw = 50;	/* 50:50 */
+#endif /* VSDB_BW_ALLOCATE_ENABLE */
 	}
 	else if (mode == 1) {
-		
-		ampdu_mpdu = 8;	
+		/* Miracast source mode */
+		ampdu_mpdu = 8;	/* for tx latency */
 #if defined(ROAM_ENABLE) || defined(DISABLE_BUILTIN_ROAM)
-		roam_off = 1; 
+		roam_off = 1; /* roam disable */
 #endif
 #ifdef VSDB_BW_ALLOCATE_ENABLE
-		mchan_algo = 1;	
-		mchan_bw = 25;	
-#endif 
+		mchan_algo = 1;	/* BW based */
+		mchan_bw = 25;	/* 25:75 */
+#endif /* VSDB_BW_ALLOCATE_ENABLE */
 	}
 	else if (mode == 2) {
-		
-		ampdu_mpdu = -1;	
+		/* Miracast sink/PC Gaming mode */
+		ampdu_mpdu = -1;	/* FW default */
 #if defined(ROAM_ENABLE) || defined(DISABLE_BUILTIN_ROAM)
-		roam_off = 1; 
+		roam_off = 1; /* roam disable */
 #endif
 #ifdef VSDB_BW_ALLOCATE_ENABLE
-		mchan_algo = 0;	
-		mchan_bw = 50;	
-#endif 
+		mchan_algo = 0;	/* Default */
+		mchan_bw = 50;	/* 50:50 */
+#endif /* VSDB_BW_ALLOCATE_ENABLE */
 	}
 	else {
 		WLDEV_ERROR(("Unknown mode: %d\n", mode));
 		return -1;
 	}
 
-	
+	/* Update ampdu_mpdu */
 	error = wldev_iovar_setint(dev, "ampdu_mpdu", ampdu_mpdu);
 	if (error) {
 		WLDEV_ERROR(("Failed to set ampdu_mpdu: mode:%d, error:%d\n",
@@ -486,7 +495,7 @@ int wldev_miracast_tuning(
 			mode, error));
 		return -1;
 	}
-#endif 
+#endif /* ROAM_ENABLE || DISABLE_BUILTIN_ROAM */
 
 #ifdef VSDB_BW_ALLOCATE_ENABLE
 	error = wldev_iovar_setint(dev, "mchan_algo", mchan_algo);
@@ -502,7 +511,7 @@ int wldev_miracast_tuning(
 			mode, error));
 		return -1;
 	}
-#endif 
+#endif /* VSDB_BW_ALLOCATE_ENABLE */
 
 	return error;
 }
@@ -573,10 +582,10 @@ int wldev_get_assoc_resp_ie(
 	bzero(bssid, 6);
 	bzero(null_bssid, 6);
 
-	
+	/* Check Association */
 	error = wldev_ioctl(dev, WLC_GET_BSSID, &bssid, sizeof(bssid), 0);
 	if (error == BCME_NOTASSOCIATED) {
-		
+		/* Not associated */
 		bytes_written += snprintf(&command[bytes_written], total_len, "NA");
 		goto done;
 	}
@@ -585,12 +594,12 @@ int wldev_get_assoc_resp_ie(
 		return -1;
 	}
 	else if (memcmp(bssid, null_bssid, ETHER_ADDR_LEN) == 0) {
-		
+		/*  Zero BSSID: Not associated */
 		bytes_written += snprintf(&command[bytes_written], total_len, "NA");
 		goto done;
 	}
 
-	
+	/* Get assoc_info */
 	bzero(smbuf, sizeof(smbuf));
 	error = wldev_iovar_getbuf(dev, "assoc_info", NULL, 0, smbuf, sizeof(smbuf), NULL);
 	if (error < 0) {
@@ -601,7 +610,7 @@ int wldev_get_assoc_resp_ie(
 	assoc_info = (wl_assoc_info_t *)smbuf;
 	resp_ies_len = dtoh32(assoc_info->resp_len) - sizeof(struct dot11_assoc_resp);
 
-	
+	/* Retrieve assoc resp IEs */
 	if (resp_ies_len) {
 		error = wldev_iovar_getbuf(dev, "assoc_resp_ies", NULL, 0, smbuf, sizeof(smbuf),
 			NULL);
@@ -610,10 +619,10 @@ int wldev_get_assoc_resp_ie(
 			return -1;
 		}
 
-		
+		/* Length */
 		bytes_written += snprintf(&command[bytes_written], total_len, "%d,", resp_ies_len);
 
-		
+		/* IEs */
 		if ((total_len - bytes_written) > resp_ies_len) {
 			for (i = 0; i < resp_ies_len; i++) {
 				bytes_written += sprintf(&command[bytes_written], "%02x", smbuf[i]);
@@ -631,4 +640,4 @@ done:
 
 	return bytes_written;
 }
-#endif 
+#endif /* defined(CUSTOM_PLATFORM_NV_TEGRA) */

@@ -70,5 +70,9 @@ obj-$(CONFIG_CABLE_DETECT_8XXX) += cable_detect_8xxx.o
 obj-$(CONFIG_QCOM_LIQUID_DOCK)	+= qcom_liquid_dock.o
 obj-$(CONFIG_FPR_SYN)	+= fpr_Synaptics/
 obj-$(CONFIG_FPR_CT)	+= fpr_CrucialTec/
+obj-$(CONFIG_FPR_FPC)  += fpr_FingerprintCard/
+obj-$(CONFIG_FPR_FPC_REE)  += fpr_FingerprintCard_REE/
 obj-y				+= qcom/
 obj-y				+= headset/
+
+obj-$(CONFIG_HTC_FLASHLIGHT) += htc_flashlight.o

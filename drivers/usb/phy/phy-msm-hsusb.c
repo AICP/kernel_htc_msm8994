@@ -152,6 +152,9 @@ struct msm_hsphy {
 	u32			lpm_flags;
 	bool			suspended;
 	bool			vdda_force_on;
+	struct pinctrl          *phy_pinctrl;
+	struct pinctrl_state    *ncn_gpio_init;
+	int			l24_always_on;
 
 	/* Using external VBUS/ID notification */
 	bool			ext_vbus_id;
@@ -161,6 +164,47 @@ struct msm_hsphy {
 
 /* global reference counter between all HSPHY instances */
 static atomic_t hsphy_active_count;
+
+static int msm_hsusb_pinctrl(struct platform_device *pdev, struct msm_hsphy *phy)
+{
+	int ret = 0;
+	phy->phy_pinctrl = devm_pinctrl_get(&pdev->dev);
+	if (IS_ERR(phy->phy_pinctrl)) {
+		if (of_property_read_bool(pdev->dev.of_node, "pinctrl-names")) {
+			printk(KERN_WARNING "Error encountered while getting pinctrl");
+			ret = PTR_ERR(phy->phy_pinctrl);
+		}
+		printk(KERN_INFO "Target does not use pinctrl\n");
+		phy->phy_pinctrl = NULL;
+		return ret;
+	}
+	phy->ncn_gpio_init = pinctrl_lookup_state(phy->phy_pinctrl, "usb_ncn1188_gpio_in1");
+	if (IS_ERR_OR_NULL(phy->ncn_gpio_init)){
+		printk(KERN_WARNING "[USB] %s: can't get the pinctrl state\n", __func__);
+		ret = PTR_ERR(phy->ncn_gpio_init);
+		phy->ncn_gpio_init = NULL;
+		return ret;
+	}
+	ret = pinctrl_select_state(phy->phy_pinctrl, phy->ncn_gpio_init);
+	if (ret) {
+		printk(KERN_WARNING "[USB] %s: can't init GPIO IN1:%d!\n",__func__, ret);
+		return ret;
+	}
+
+	phy->ncn_gpio_init = pinctrl_lookup_state(phy->phy_pinctrl, "usb_ncn1188_gpio_in2");
+	if (IS_ERR_OR_NULL(phy->ncn_gpio_init)){
+		printk(KERN_WARNING "[USB] %s: can't get the pinctrl state\n", __func__);
+		ret = PTR_ERR(phy->ncn_gpio_init);
+		phy->ncn_gpio_init = NULL;
+		return ret;
+	}
+	ret = pinctrl_select_state(phy->phy_pinctrl, phy->ncn_gpio_init);
+	if (ret) {
+		printk(KERN_WARNING "[USB] %s: can't init GPIO IN2:%d!\n",__func__, ret);
+		return ret;
+	}
+	return 0;
+}
 
 static int msm_hsusb_config_vdd(struct msm_hsphy *phy, int high)
 {
@@ -229,8 +273,16 @@ static int msm_hsusb_ldo_enable(struct msm_hsphy *phy, int on)
 		goto put_vdda33_lpm;
 	}
 /*++ 2014/07/25, USB Team, PCN00001 ++*/
-	if (L24_keep == 0) {
-		L24_keep = 1;
+	if (phy->l24_always_on) {
+		if (L24_keep == 0) {
+			L24_keep = 1;
+			rc = regulator_enable(phy->vdda33);
+			if (rc) {
+				dev_err(phy->phy.dev, "Unable to enable vdda33\n");
+				goto unset_vdda33;
+			}
+		}
+	} else {
 		rc = regulator_enable(phy->vdda33);
 		if (rc) {
 			dev_err(phy->phy.dev, "Unable to enable vdda33\n");
@@ -242,15 +294,19 @@ static int msm_hsusb_ldo_enable(struct msm_hsphy *phy, int on)
 
 disable_regulators:
 /*++ 2014/07/25, USB Team, PCN00001 ++*/
-/*	rc = regulator_disable(phy->vdda33);
-	if (rc)
-		dev_err(phy->phy.dev, "Unable to disable vdda33\n");
-*/
+	if (!phy->l24_always_on) {
+		rc = regulator_disable(phy->vdda33);
+		if (rc)
+			dev_err(phy->phy.dev, "Unable to disable vdda33\n");
+	}
+
 unset_vdda33:
-/*	rc = regulator_set_voltage(phy->vdda33, 0, USB_HSPHY_3P3_VOL_MAX);
-	if (rc)
-		dev_err(phy->phy.dev, "unable to set voltage for vdda33\n");
-*/
+	if (!phy->l24_always_on) {
+		rc = regulator_set_voltage(phy->vdda33, 0, USB_HSPHY_3P3_VOL_MAX);
+		if (rc)
+			dev_err(phy->phy.dev, "unable to set voltage for vdda33\n");
+	}
+
 /*-- 2014/07/25, USB Team, PCN00001 --*/
 put_vdda33_lpm:
 	rc = regulator_set_optimum_mode(phy->vdda33, 0);
@@ -387,13 +443,13 @@ static int msm_hsphy_init(struct usb_phy *uphy)
 		phy->hsphy_host_init_seq = override_phy_init;
 	}
 	if (!uphy->is_in_host && phy->hsphy_init_seq) {
-		printk("[USB] peripheral mode phy setting\n");
+		printk("[USB] peripheral mode phy setting:%x\n", phy->hsphy_init_seq);
 		msm_usb_write_readback(phy->base,
 					PARAMETER_OVERRIDE_X_REG(0), 0x03FFFFFF,
 					phy->hsphy_init_seq & 0x03FFFFFF);
 	}
 	if (uphy->is_in_host && phy->hsphy_host_init_seq) {
-		printk("[USB] host mode phy setting\n");
+		printk("[USB] host mode phy setting:%x\n", phy->hsphy_host_init_seq);
 		msm_usb_write_readback(phy->base,
 					PARAMETER_OVERRIDE_X_REG(0), 0x03FFFFFF,
 					phy->hsphy_host_init_seq & 0x03FFFFFF);
@@ -645,14 +701,14 @@ static int msm_hsphy_set_suspend(struct usb_phy *uphy, int suspend)
 			phy->hsphy_host_init_seq = override_phy_init;
 		}
 		if (!uphy->is_in_host && phy->hsphy_init_seq) {
-			printk("[USB] peripheral mode phy setting\n");
+			printk("[USB] peripheral mode phy setting: %x\n", phy->hsphy_init_seq);
 			msm_usb_write_readback(phy->base,
 					PARAMETER_OVERRIDE_X_REG(0),
 					0x03FFFFFF,
 					phy->hsphy_init_seq & 0x03FFFFFF);
 		}
 		if (uphy->is_in_host && phy->hsphy_host_init_seq) {
-			printk("[USB] host mode phy setting\n");
+			printk("[USB] host mode phy setting: %x\n", phy->hsphy_host_init_seq);
 			msm_usb_write_readback(phy->base,
 					PARAMETER_OVERRIDE_X_REG(0),
 					0x03FFFFFF,
@@ -879,6 +935,15 @@ static int msm_hsphy_probe(struct platform_device *pdev)
 		}
 	}
 
+	if (of_property_read_u32(dev->of_node, "htc,l24-always-on", &phy->l24_always_on))
+		dev_dbg(dev, "unable to read htc,l24-always-on\n");
+	else
+		printk(KERN_INFO "%s: read htc,l24-always-on value:%d\n", __func__, phy->l24_always_on);
+
+	ret = msm_hsusb_pinctrl(pdev, phy);
+	if (ret) {
+		printk(KERN_ERR "%s: ncn1188 pinctrl error. For HIMA/B3 project, please ignore it.\n", __func__);
+	}
 	ret = msm_hsusb_ldo_enable(phy, 1);
 	if (ret) {
 		dev_err(dev, "hsusb vreg enable failed\n");

@@ -2515,7 +2515,7 @@ static int msm_dai_q6_mi2s_hw_params(struct snd_pcm_substream *substream,
 			__func__, params_format(params));
 		return -EINVAL;
 	}
-	pr_info("%s: port 0x%x bit %d rate %d\n",__func__,port_id,dai_data->bitwidth,dai_data->rate);
+	pr_debug("%s: port 0x%x bit %d rate %d\n",__func__,port_id,dai_data->bitwidth,dai_data->rate); //HTC_AUDIO
 	dai_data->port_config.i2s.i2s_cfg_minor_version =
 			AFE_API_VERSION_I2S_CONFIG;
 	dai_data->port_config.i2s.sample_rate = dai_data->rate;

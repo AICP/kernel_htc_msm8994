@@ -22,16 +22,20 @@
 #define FALSE       0
 #define TRUE        1
 
+/* Restricted charge level */
 #define RESTRICT_NONE   0
 #define RESTRICT_SOFT   1
 #define RESTRICT_HEAVY  2
 
-#if 0
+#if 0//FIXME
 #define CHARGER_STORE_MAGIC_NUM		0xDDAACC00
 #define BATTERY_HBOOT_MAGIC_NUM		0xDDAACC11
-#define CHARGER_STORE_MAGIC_OFFSET		1056	
-#define CHARGER_STORE_PRE_DELTA_VDDMAX_OFFSET	1080	
+#define CHARGER_STORE_MAGIC_OFFSET		1056	/*0x420*/
+#define CHARGER_STORE_PRE_DELTA_VDDMAX_OFFSET	1080	/*0x438*/
 
+/**
+ * struct ext_usb_chg_pm8941 -
+ */
 struct ext_usb_chg_pm8941 {
 	const char	*name;
 	void		*ctx;
@@ -44,11 +48,17 @@ struct ext_usb_chg_pm8941 {
 
 #ifdef CONFIG_QPNP_SMBCHARGER
 #ifdef CONFIG_HTC_BATT_8960
+/**
+ * pm8941_is_pwr_src_plugged_in - is usb or dc plugged in
+ *
+ * if usb or dc is under voltage or over voltage this will return false
+ */
 
-#if 0
+#if 0//FIXME
 int pm8941_is_pwr_src_plugged_in(void);
 int pm8941_get_batt_temperature(int *result);
 
+/* htc_charger interface */
 
 
 
@@ -93,6 +103,7 @@ int pmi8994_is_batt_temp_fault_disable_chg(int *result);
 int pmi8994_is_batt_temperature_fault(int *result);
 int pmi8994_get_batt_voltage(int *result);
 int pmi8994_is_bad_cable_used(int *result);
+int pmi8994_is_quick_charger_used(bool *result);
 int pmi8994_set_aicl_deglitch_wa_check(void);
 int pmi8994_dump_all(void);
 int pmi8994_get_charge_type(void);
@@ -123,13 +134,17 @@ int pmi8994_prepare_suspend(void);
 int pmi8994_complete_resume(void);
 int pm8994_set_hsml_target_ma(int target_ma);
 int pmi8994_limit_input_current(bool enable, int reason);
+int pmi8994_get_usb_type(int *result);
+int pmi8994_get_vbus(int *result);
+int pmi8994_get_max_iusb(int *result);
+int pmi8994_get_AICL(int *result);
 bool pmi8994_is_HVDCP_9V_done(void);
 
-#endif
-#else 
+#endif/* CONFIG_HTC_BATT_8960 */
+#else /* CONFIG_QPNP_SMBCHARGER */
 #ifdef CONFIG_HTC_BATT_8960
 
-#if 0
+#if 0//FIXME
 static inline int pm8941_is_pwr_src_plugged_in(void)
 {
 	return -ENXIO;
@@ -286,12 +301,14 @@ static inline int pmi8994_is_bad_cable_used(int *result)
 {
 	return -ENXIO;
 }
-
+static inline int pmi8994_is_quick_charger_used(bool *result)
+{
+	return -ENXIO;
+}
 static inline int pmi8994_set_aicl_deglitch_wa_check(void)
 {
 	return -ENXIO;
 }
-
 static inline int pmi8994_dump_all(void)
 {
 	return -ENXIO;
@@ -408,14 +425,34 @@ static inline int pmi8994_limit_input_current(bool enable, int reason)
 
 static inline int pm8994_set_hsml_target_ma(int target_ma)
 {
-		return -ENXIO;
+	return -ENXIO;
+}
+
+static inline int pmi8994_get_usb_type(int *result)
+{
+	return -ENXIO;
+}
+
+static inline int pmi8994_get_vbus(int *result)
+{
+	return -ENXIO;
+}
+
+static inline int pmi8994_get_max_iusb(int *result)
+{
+	return -ENXIO;
+}
+
+static inline int pmi8994_get_AICL(int *result)
+{
+	return -ENXIO;
 }
 
 static inline bool pmi8994_is_HVDCP_9V_done(void)
 {
-		return -ENXIO;
+	return -ENXIO;
 }
-#endif 
-#endif 
-#endif 
+#endif /* CONFIG_HTC_BATT_8960 */
+#endif /* CONFIG_QPNP_SMBCHARGER */
+#endif /* __QPNP_CHARGER_H */
 

@@ -1310,8 +1310,6 @@ int buf_ref_get(struct msm_vidc_inst *inst, struct buffer_info *binfo)
 		dprintk(VIDC_DBG, "%s: invalid ref_cnt: %d\n", __func__, cnt);
 		cnt = -EINVAL;
 	}
-	if (cnt == 2)
-		inst->buffers_held_in_driver++;
 
 	dprintk(VIDC_DBG, "REF_GET[%d] fd[0] = %d\n", cnt, binfo->fd[0]);
 
@@ -1360,7 +1358,6 @@ int buf_ref_put(struct msm_vidc_inst *inst, struct buffer_info *binfo)
 			binfo->fd[0]);
 		binfo->pending_deletion = true;
 	} else if (qbuf_again) {
-		inst->buffers_held_in_driver--;
 		rc = qbuf_dynamic_buf(inst, binfo);
 		if (!rc)
 			return rc;
@@ -2098,10 +2095,14 @@ static int msm_comm_init_core(struct msm_vidc_inst *inst)
 	if (!inst || !inst->core)
 		return -EINVAL;
 
+        /* HTC_START: ION debug mechanism enhancement
+         * Pass the venus ION client to venus_hfi_device to recognize the ION
+         * buffers which are allocated on venus side is belong to same video instance
+         */
         hdev = inst->core->device;
         vhdev = hdev->hfi_device_data;
         vhdev->inst = inst;
-        
+        /* HTC_END */
 
 	rc = msm_comm_load_fw(inst->core);
 	if (rc) {
@@ -2774,9 +2775,9 @@ fail_set_buffers:
 fail_kzalloc:
 	msm_comm_smem_free(inst, handle);
 err_no_mem:
-	
+	/* HTC_START: In memory allocation failed case, need to change the ION client to original one (clnt_import). */
 	mem_client->clnt = mem_client->clnt_import;
-	
+	/* HTC_END */
 	return rc;
 
 }

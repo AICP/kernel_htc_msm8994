@@ -185,6 +185,14 @@ config KPDPWR_S2_DVDD_RESET
 	help
 	  Say Y here if you would like to support power key stage 2 dVdd reset when SW gets stuck.
 
+config INPUT_KEYLED
+	tristate "Virtual key led blink"
+	depends on INPUT
+	select INPUT_KEYCOMBO
+	help
+	  Say Y here if you want to blink virtual key led after 3 seconds
+	  reset combination keys are pressed.
+
 config INPUT_KEYRESET
 	tristate "Reset key"
 	depends on INPUT
