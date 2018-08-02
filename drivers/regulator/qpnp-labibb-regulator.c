@@ -30,10 +30,12 @@
 #define QPNP_LAB_TYPE			0x24
 #define QPNP_IBB_TYPE			0x20
 
+/* Common register value for LAB/IBB */
 #define REG_LAB_IBB_LCD_MODE		0x0
 #define REG_LAB_IBB_AMOLED_MODE		BIT(7)
 #define REG_LAB_IBB_SEC_UNLOCK_CODE	0xA5
 
+/* LAB register offset definitions */
 #define REG_LAB_STATUS1			0x08
 #define REG_LAB_VOLTAGE			0x41
 #define REG_LAB_RING_SUPPRESSION_CTL	0x42
@@ -51,41 +53,53 @@
 #define REG_LAB_SOFT_START_CTL		0x5F
 #define REG_LAB_SEC_ACCESS		0xD0
 
+/* LAB register bits definitions */
 
+/* REG_LAB_STATUS1 */
 #define LAB_STATUS1_VREG_OK_MASK	BIT(7)
 #define LAB_STATUS1_VREG_OK		BIT(7)
 
+/* REG_LAB_VOLTAGE */
 #define LAB_VOLTAGE_OVERRIDE_EN		BIT(7)
 #define LAB_VOLTAGE_SET_BITS		4
 #define LAB_VOLTAGE_SET_MASK		((1 << LAB_VOLTAGE_SET_BITS) - 1)
 
+/* REG_LAB_RING_SUPPRESSION_CTL */
 #define LAB_RING_SUPPRESSION_CTL_EN	BIT(7)
 
+/* REG_LAB_MODULE_RDY */
 #define LAB_MODULE_RDY_EN		BIT(7)
 
+/* REG_LAB_ENABLE_CTL */
 #define LAB_ENABLE_CTL_EN		BIT(7)
 
+/* REG_LAB_PD_CTL */
 #define LAB_PD_CTL_FULL_PD		BIT(0)
 #define LAB_PD_CTL_STRENGTH_MASK	BIT(0)
 #define LAB_PD_CTL_DISABLE		BIT(1)
 #define LAB_PD_CTL_EN_MASK		BIT(1)
 
+/* REG_LAB_IBB_EN_RDY */
 #define LAB_IBB_EN_RDY_EN		BIT(7)
 #define LAB_IBB_EN_RDY_MASK		0x7F
 #define LAB_IBB_EN_RDY_SHIFT	7
 
+/* REG_LAB_CURRENT_LIMIT */
 #define LAB_CURRENT_LIMIT_BITS		3
 #define LAB_CURRENT_LIMIT_MASK		((1 << LAB_CURRENT_LIMIT_BITS) - 1)
 #define LAB_CURRENT_LIMIT_EN		BIT(7)
 
+/* REG_LAB_CURRENT_SENSE */
 #define LAB_CURRENT_SENSE_GAIN_BITS	2
 #define LAB_CURRENT_SENSE_GAIN_MASK	((1 << LAB_CURRENT_SENSE_GAIN_BITS) \
 					- 1)
 
+/* REG_LAB_PS_CTL */
 #define LAB_PS_CTL_BITS			2
 #define LAB_PS_CTL_MASK			((1 << LAB_PS_CTL_BITS) - 1)
 #define LAB_PS_CTL_EN			BIT(7)
 
+/* REG_LAB_RDSON_MNGMNT */
 #define LAB_RDSON_MNGMNT_NFET_SLEW_EN	BIT(5)
 #define LAB_RDSON_MNGMNT_PFET_SLEW_EN	BIT(4)
 #define LAB_RDSON_MNGMNT_NFET_BITS	2
@@ -94,13 +108,16 @@
 #define LAB_RDSON_MNGMNT_PFET_BITS	2
 #define LAB_RDSON_MNGMNT_PFET_MASK	((1 << LAB_RDSON_MNGMNT_PFET_BITS) - 1)
 
+/* REG_LAB_PRECHARGE_CTL */
 #define LAB_PRECHARGE_CTL_EN		BIT(2)
 #define LAB_PRECHARGE_CTL_EN_BITS	2
 #define LAB_PRECHARGE_CTL_EN_MASK	((1 << LAB_PRECHARGE_CTL_EN_BITS) - 1)
 
+/* REG_LAB_SOFT_START_CTL */
 #define LAB_SOFT_START_CTL_BITS		2
 #define LAB_SOFT_START_CTL_MASK		((1 << LAB_SOFT_START_CTL_BITS) - 1)
 
+/* IBB register offset definitions */
 #define REG_IBB_STATUS1			0x08
 #define REG_IBB_VOLTAGE		0x41
 #define REG_IBB_RING_SUPPRESSION_CTL	0x42
@@ -116,36 +133,47 @@
 #define REG_IBB_NLIMIT_DAC		0x61
 #define REG_IBB_SEC_ACCESS		0xD0
 
+/* IBB register bits definition */
 
+/* REG_IBB_STATUS1 */
 #define IBB_STATUS1_VREG_OK_MASK	BIT(7)
 #define IBB_STATUS1_VREG_OK		BIT(7)
 
+/* REG_IBB_VOLTAGE */
 #define IBB_VOLTAGE_OVERRIDE_EN		BIT(7)
 #define IBB_VOLTAGE_SET_BITS		6
 #define IBB_VOLTAGE_SET_MASK		((1 << IBB_VOLTAGE_SET_BITS) - 1)
 
+/* REG_IBB_RING_SUPPRESSION_CTL */
 #define IBB_RING_SUPPRESSION_CTL_EN	BIT(7)
 
+/* REG_IBB_MODULE_RDY */
 #define IBB_MODULE_RDY_EN		BIT(7)
 
+/* REG_IBB_ENABLE_CTL */
 #define IBB_ENABLE_CTL_EN		BIT(7)
 
+/* REG_IBB_PD_CTL */
 #define IBB_PD_CTL_HALF_STRENGTH	BIT(0)
 #define IBB_PD_CTL_STRENGTH_MASK	BIT(0)
 #define IBB_PD_CTL_EN			BIT(7)
 #define IBB_PD_CTL_EN_MASK		BIT(7)
 
+/* REG_IBB_CURRENT_LIMIT */
 #define IBB_CURRENT_LIMIT_BITS		5
 #define IBB_CURRENT_LIMIT_MASK		((1 << IBB_CURRENT_LIMIT_BITS) - 1)
 #define IBB_CURRENT_LIMIT_DEBOUNCE_SHIFT	5
 #define IBB_CURRENT_LIMIT_EN		BIT(7)
 
+/* REG_IBB_PS_CTL */
 #define IBB_PS_CTL_EN			0x85
 #define IBB_PS_CTL_DISABLE		0x5
 
+/* REG_IBB_NLIMIT_DAC */
 #define IBB_NLIMIT_DAC_EN		0x0
 #define IBB_NLIMIT_DAC_DISABLE		0x5
 
+/* REG_IBB_PWRUP_PWRDN_CTL_1 */
 #define IBB_PWRUP_PWRDN_CTL_1_DLY1_BITS	2
 #define IBB_PWRUP_PWRDN_CTL_1_DLY1_MASK	\
 	((1 << IBB_PWRUP_PWRDN_CTL_1_DLY1_BITS) - 1)
@@ -157,6 +185,17 @@
 #define IBB_PWRUP_PWRDN_CTL_1_EN_DLY1	BIT(6)
 #define PWRUP_PWRDN_CTL_1_DISCHARGE_EN	BIT(2)
 
+/**
+ * enum qpnp_labibb_mode - working mode of LAB/IBB regulators
+ * %QPNP_LABIBB_STANDALONE_MODE:	configure LAB/IBB regulator as a
+ * standalone regulator
+ * %QPNP_LABIBB_LCD_MODE:		configure LAB and IBB regulators
+ * together to provide power supply for LCD
+ * %QPNP_LABIBB_AMOLED_MODE:		configure LAB and IBB regulators
+ * together to provide power supply for AMOLED
+ * %QPNP_LABIBB_MAX_MODE		max number of configureable modes
+ * supported by qpnp_labibb_regulator
+ */
 enum qpnp_labibb_mode {
 	QPNP_LABIBB_STANDALONE_MODE = 1,
 	QPNP_LABIBB_LCD_MODE,
@@ -758,12 +797,12 @@ static int qpnp_labibb_regulator_enable(struct qpnp_labibb *labibb)
 
 	udelay(labibb->lab_vreg.soft_start);
 
-	
+	/* total delay time */
 	dly = labibb->lab_vreg.soft_start + labibb->ibb_vreg.soft_start
 				+ labibb->ibb_vreg.pwrup_dly;
 	usleep_range(dly, dly + 100);
 
-	
+	/* after this delay, lab should be enabled */
 	rc = qpnp_labibb_read(labibb, &val,
 			labibb->lab_base + REG_LAB_STATUS1, 1);
 	if (rc) {
@@ -781,7 +820,7 @@ static int qpnp_labibb_regulator_enable(struct qpnp_labibb *labibb)
 		goto err_out;
 	}
 
-	
+	/* poll IBB_STATUS to make sure ibb had been enabled */
 	dly = labibb->ibb_vreg.soft_start + labibb->ibb_vreg.pwrup_dly;
 	retries = 10;
 	while (retries--) {
@@ -836,7 +875,7 @@ static int qpnp_labibb_regulator_disable(struct qpnp_labibb *labibb)
 		return rc;
 	}
 
-	
+	/* poll IBB_STATUS to make sure ibb had been disabled */
 	dly = labibb->ibb_vreg.pwrdn_dly;
 	retries = 2;
 	while (retries--) {
@@ -1178,6 +1217,11 @@ static int register_qpnp_lab_regulator(struct qpnp_labibb *labibb,
 		}
 
 		if (labibb->mode == QPNP_LABIBB_AMOLED_MODE) {
+			/*
+			 * default to 1.5 times current gain if
+			 * user doesn't specify the current-sense
+			 * dt parameter
+			 */
 			current_sense_str = "1.5x";
 			val = qpnp_labibb_get_matching_idx(current_sense_str);
 			config_current_sense = true;
@@ -1277,6 +1321,11 @@ static int register_qpnp_lab_regulator(struct qpnp_labibb *labibb,
 	return 0;
 }
 
+/** This API is used to set the pull down strength of LAB regulator
+ * regulator: the reglator device
+ * strength: if strength is 0, LAB regulator will be set to half strength.
+ * otherwise, LAB regulator will be set to full strength
+ */
 int qpnp_lab_set_pd_strength(struct regulator *regulator, u32 strength)
 {
 	struct qpnp_labibb *labibb;
@@ -1306,6 +1355,11 @@ int qpnp_lab_set_pd_strength(struct regulator *regulator, u32 strength)
 }
 EXPORT_SYMBOL(qpnp_lab_set_pd_strength);
 
+/** This API is used to enable pull down of LAB regulator
+ * regulator: the reglator device
+ * enable: if enable is true, this API will enable pull down of LAB regulator.
+ * otherwise, it will disable pull down for LAB regulator
+ */
 int qpnp_lab_pd_enable_ctl(struct regulator *regulator, bool enable)
 {
 	struct qpnp_labibb *labibb;
@@ -1335,6 +1389,11 @@ int qpnp_lab_pd_enable_ctl(struct regulator *regulator, bool enable)
 }
 EXPORT_SYMBOL(qpnp_lab_pd_enable_ctl);
 
+/** This API is used to set the pull down strength of IBB regulator
+ * regulator: the reglator device
+ * strength: if strength is 0, IBB regulator will be set to half strength.
+ * otherwise, IBB regulator will be set to full strength
+ */
 int qpnp_ibb_set_pd_strength(struct regulator *regulator, u32 strength)
 {
 	struct qpnp_labibb *labibb;
@@ -1364,6 +1423,11 @@ int qpnp_ibb_set_pd_strength(struct regulator *regulator, u32 strength)
 }
 EXPORT_SYMBOL(qpnp_ibb_set_pd_strength);
 
+/** This API is used to enable pull down of IBB regulator
+ * regulator: the reglator device
+ * enable: if enable is true, this API will enable pull down of IBB regulator.
+ * otherwise, it will disable pull down for IBB regulator
+ */
 int qpnp_ibb_pd_enable_ctl(struct regulator *regulator, bool enable)
 {
 	struct qpnp_labibb *labibb;
@@ -1393,6 +1457,10 @@ int qpnp_ibb_pd_enable_ctl(struct regulator *regulator, bool enable)
 }
 EXPORT_SYMBOL(qpnp_ibb_pd_enable_ctl);
 
+/** This API is used to set the power up delay for IBB regulator
+ * regulator: the reglator device
+ * val: the delay in us for power up of IBB regulator
+ */
 int qpnp_ibb_set_pwrup_dly(struct regulator *regulator, u32 val)
 {
 	struct qpnp_labibb *labibb;
@@ -1442,6 +1510,10 @@ _exit:
 }
 EXPORT_SYMBOL(qpnp_ibb_set_pwrup_dly);
 
+/** This API is used to set the power down delay for IBB regulator
+ * regulator: the reglator device
+ * val: the delay in us for power down of IBB regulator
+ */
 int qpnp_ibb_set_pwrdn_dly(struct regulator *regulator, u32 val)
 {
 	struct qpnp_labibb *labibb;
@@ -1990,6 +2062,10 @@ static int register_qpnp_ibb_regulator(struct qpnp_labibb *labibb,
 	}
 
 	if (labibb->mode == QPNP_LABIBB_AMOLED_MODE) {
+		/*
+		 * AMOLED mode needs ibb discharge resistor to be
+		 * configured for 300KOhm
+		 */
 		if (tmp < ibb_discharge_resistor_plan[0])
 			tmp = ibb_discharge_resistor_plan[0];
 	}

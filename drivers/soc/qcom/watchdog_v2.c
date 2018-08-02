@@ -31,6 +31,7 @@
 #include <soc/qcom/memory_dump.h>
 #include <soc/qcom/watchdog.h>
 #include <linux/kmemleak.h>
+
 #if defined(CONFIG_HTC_DEBUG_WATCHDOG)
 #include <linux/htc_debug_tools.h>
 #endif
@@ -94,12 +95,22 @@ struct msm_watchdog_data {
 };
 
 #if defined(CONFIG_HTC_DEBUG_WATCHDOG)
+/**
+ * suspend_watchdog_deferred:
+ * Parameter to decide whether to defer suspension of watchdog. If set as 1, suspend
+ * console is deferred to latter stages.
+ */
 int suspend_watchdog_deferred;
 module_param_named(
 		suspend_watchdog_deferred, suspend_watchdog_deferred, int, S_IRUGO | S_IWUSR | S_IWGRP
 		);
 #endif
 
+/*
+ * On the kernel command line specify
+ * watchdog_v2.enable=1 to enable the watchdog
+ * By default watchdog is turned on
+ */
 static int enable = 1;
 module_param(enable, int, 0);
 #if defined(CONFIG_HTC_DEBUG_WATCHDOG)
@@ -129,7 +140,7 @@ void msm_watchdog_bark(void)
 	__raw_writel(1, msm_wdt_base + WDT0_EN);
 }
 EXPORT_SYMBOL(msm_watchdog_bark);
-#endif 
+#endif /* CONFIG_HTC_DEBUG_WATCHDOG */
 
 /*
  * On the kernel command line specify
@@ -158,6 +169,9 @@ static void dump_cpu_alive_mask(struct msm_watchdog_data *wdog_dd)
 static int msm_watchdog_do_suspend(struct msm_watchdog_data *wdog_dd)
 {
 	__raw_writel(1, wdog_dd->base + WDT0_RST);
+#ifdef CONFIG_HTC_DEBUG_FOOTPRINT
+	set_msm_watchdog_pet_footprint(mpm_clock_base);
+#endif
 	if (wdog_dd->wakeup_irq_enable) {
 		/* Make sure register write is complete before proceeding */
 		mb();
@@ -167,7 +181,6 @@ static int msm_watchdog_do_suspend(struct msm_watchdog_data *wdog_dd)
 	__raw_writel(0, wdog_dd->base + WDT0_EN);
 #ifdef CONFIG_HTC_DEBUG_FOOTPRINT
 	set_msm_watchdog_en_footprint(0);
-	set_msm_watchdog_pet_footprint(mpm_clock_base);
 #endif
 	mb();
 	wdog_dd->enabled = false;
@@ -194,6 +207,11 @@ static int msm_watchdog_suspend(struct device *dev)
 
 #if defined(CONFIG_HTC_DEBUG_WATCHDOG)
 	if (suspend_watchdog_deferred) {
+		/* for deferred watchdog suspend, it won't write petting utc time.
+		 * This is because timekeeping is suspended, we need to write it here.
+		 * It might cause 50 ~ 100 ms offset to real watchdog petting time
+		 * for suspending watchdog.
+		 */
 		set_msm_watchdog_pet_time_utc();
 		return 0;
 	}
@@ -237,6 +255,11 @@ static int msm_watchdog_resume(struct device *dev)
 
 #if defined(CONFIG_HTC_DEBUG_WATCHDOG)
 	if (suspend_watchdog_deferred) {
+		/* for deferred watchdog suspend, it won't write petting utc time.
+		 * This is because timekeeping is suspended, we need to write it here.
+		 * It might cause 50 ~ 100 ms offset to real watchdog petting time
+		 * for suspending watchdog.
+		 */
 		set_msm_watchdog_pet_time_utc();
 		return 0;
 	}
@@ -483,13 +506,13 @@ static __ref int watchdog_kthread(void *arg)
 		mod_timer(&wdog_dd->pet_timer, jiffies + delay_time);
 	}
 #if defined(CONFIG_HTC_DEBUG_WATCHDOG)
-	htc_debug_watchdog_update_last_pet(wdog_dd->last_pet);
-	
+		htc_debug_watchdog_update_last_pet(wdog_dd->last_pet);
+/* TODO: support this funciton with CONFIG_SPARSE_IRQ */
 #if !defined(CONFIG_SPARSE_IRQ)
-	
-	htc_debug_watchdog_dump_irqs(0);
+		/* records last_irqs */
+		htc_debug_watchdog_dump_irqs(0);
 #endif
-#endif
+#endif /* CONFIG_HTC_DEBUG_WATCHDOG */
 	return 0;
 }
 
@@ -641,7 +664,7 @@ static void configure_bark_dump(struct msm_watchdog_data *wdog_dd)
 		}
 	} else {
 #if defined(CONFIG_HTC_DEBUG_MEM_DUMP_TABLE)
-		
+		/* cpu dump data entry and cpu_buf are already configured and registered in LK, so just return */
 		return;
 #endif
 		cpu_data = kzalloc(sizeof(struct msm_dump_data) *

@@ -216,8 +216,8 @@ struct log {
 #if defined(CONFIG_LOG_BUF_MAGIC)
 	u32 magic;		/* handle for ramdump analysis tools */
 #endif
-	u8 logbuf_cpu_id;	
-	u32 logbuf_pid;		
+	u8 logbuf_cpu_id;	/* cpu core number */
+	u32 logbuf_pid;		/* process id */
 };
 
 /*
@@ -1540,7 +1540,7 @@ int do_syslog(int type, char __user *buf, int len, bool from_file)
 		error = syslog_print_all(buf, len, clear);
 		break;
 #if defined(CONFIG_HTC_DEBUG_BOOTLOADER_LOG)
-	
+	/* Read last kernel messages + LK/LAST LK log*/
 	case SYSLOG_ACTION_READ_ALL_APPEND_LK:
 		error = -EINVAL;
 		if (!buf || len < 0)
@@ -1806,8 +1806,8 @@ static struct cont {
 	u8 facility;			/* log level of first message */
 	enum log_flags flags;		/* prefix, newline flags */
 	bool flushed:1;			/* buffer sealed and committed */
-	u8 cont_cpu_id;			
-	u32 cont_pid;			
+	u8 cont_cpu_id;			/* cpu core number */
+	u32 cont_pid;			/* process id */
 } cont;
 
 static void cont_flush(enum log_flags flags)
@@ -2301,6 +2301,11 @@ module_param_named(console_suspend, console_suspend_enabled,
 MODULE_PARM_DESC(console_suspend, "suspend console during suspend"
 	" and hibernate operations");
 
+/**
+ * suspend_console_deferred:
+ * Parameter to decide whether to defer suspension of console. If set as 1, suspend
+ * console is deferred to latter stages.
+ */
 int suspend_console_deferred;
 module_param_named(
 		suspend_console_deferred, suspend_console_deferred, int, S_IRUGO | S_IWUSR | S_IWGRP

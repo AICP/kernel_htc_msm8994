@@ -44,6 +44,8 @@ struct htc_gauge {
 	int (*store_battery_ui_soc)(int soc_ui);
 	int (*get_battery_ui_soc)(void);
 	int (*check_consistent)(void);
+	void(*get_batt_cycle)(unsigned int *total_level, unsigned int *overheat_sec,
+				unsigned int *first_use_time, unsigned int *batt_checksum);
 	int (*is_battery_temp_fault)(int *result);
 	int (*is_battery_full)(int *result);
 	int (*enter_qb_mode)(void);
@@ -53,7 +55,7 @@ struct htc_gauge {
 	int (*dump_all)(void);
 #endif
 	int (*get_attr_text)(char *buf, int size);
-	
+	/* battery voltage alarm */
 	int (*register_lower_voltage_alarm_notifier)(void (*callback)(int));
 	int (*enable_lower_voltage_alarm)(int enable);
 	int (*set_lower_voltage_alarm_threshold)(int thres_mV);
@@ -61,8 +63,10 @@ struct htc_gauge {
 	int (*check_soc_for_sw_ocv)(void);
 };
 
+/* let driver including this .h can notify event to htc battery */
 extern int fg_probe_flag;
 int htc_gauge_event_notify(enum htc_gauge_event);
+/* htc_gauge convenience function */
 int htc_gauge_get_battery_voltage(int *result);
 int htc_gauge_set_chg_ovp(int is_ovp);
 #endif

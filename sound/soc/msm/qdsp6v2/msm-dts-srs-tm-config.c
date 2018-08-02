@@ -141,6 +141,47 @@ static int msm_dts_srs_trumedia_control_set(struct snd_kcontrol *kcontrol,
 	pr_debug("SRS control normal called\n");
 	msm_pcm_routing_acquire_lock();
 	port_id = srs_port_id[adm_port_index];
+	port_id = SLIMBUS_0_RX;
+	ret = msm_dts_srs_trumedia_control_set_(port_id, kcontrol, ucontrol);
+	msm_pcm_routing_release_lock();
+	return ret;
+}
+
+static int msm_dts_srs_trumedia_control_i2s_set(struct snd_kcontrol *kcontrol,
+					  struct snd_ctl_elem_value *ucontrol)
+{
+	int ret, port_id;
+
+	pr_debug("SRS control I2S called\n");
+	msm_pcm_routing_acquire_lock();
+	port_id = PRIMARY_I2S_RX;
+	ret = msm_dts_srs_trumedia_control_set_(port_id, kcontrol, ucontrol);
+	msm_pcm_routing_release_lock();
+	return ret;
+}
+
+static int msm_dts_srs_trumedia_control_mi2s_set(struct snd_kcontrol *kcontrol,
+					  struct snd_ctl_elem_value *ucontrol)
+{
+	int ret, port_id;
+
+	pr_debug("SRS control MI2S called\n");
+	msm_pcm_routing_acquire_lock();
+	port_id = AFE_PORT_ID_QUATERNARY_MI2S_RX; // HTC_AUD
+	ret = msm_dts_srs_trumedia_control_set_(port_id, kcontrol, ucontrol);
+	msm_pcm_routing_release_lock();
+	return ret;
+}
+
+static int msm_dts_srs_trumedia_control_hdmi_set(struct snd_kcontrol *kcontrol,
+					   struct snd_ctl_elem_value *ucontrol)
+{
+	int ret, port_id;
+
+	pr_debug("SRS control HDMI called\n");
+	msm_pcm_routing_acquire_lock();
+	port_id = HDMI_RX;
+>>>>>>> a1a9c96e6e9e... import HTC kernel source code
 	ret = msm_dts_srs_trumedia_control_set_(port_id, kcontrol, ucontrol);
 	msm_pcm_routing_release_lock();
 	return ret;

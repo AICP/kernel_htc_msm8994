@@ -28,12 +28,17 @@
  * $Id: dhd_flowrings.h  jaganlv $
  */
 
+/****************
+ * Common types *
+ */
 
 #ifndef _dhd_flowrings_h_
 #define _dhd_flowrings_h_
 
+/* Max pkts held in a flow ring's backup queue */
 #define FLOW_RING_QUEUE_THRESHOLD       (2048)
 
+/* Number of H2D common rings : PCIE Spec Rev? */
 #define FLOW_RING_COMMON                2
 
 #define FLOWID_INVALID                  (ID16_INVALID)
@@ -51,6 +56,7 @@
 #define DHD_FLOW_PRIO_TID_MAP		1
 #define DHD_FLOW_PRIO_LLR_MAP		2
 
+/* Pkttag not compatible with PROP_TXSTATUS or WLFC */
 typedef struct dhd_pkttag_fr {
 	uint16  flowid;
 	int     dataoff;
@@ -62,6 +68,7 @@ typedef struct dhd_pkttag_fr {
 #define DHD_PKTTAG_FLOWID(tag)              ((tag)->flowid)
 #define DHD_PKTTAG_DATAOFF(tag)             ((tag)->dataoff)
 
+/* Hashing a MacAddress for lkup into a per interface flow hash table */
 #define DHD_FLOWRING_HASH_SIZE    256
 #define	DHD_FLOWRING_HASHINDEX(ea, prio) \
 	       ((((uint8 *)(ea))[3] ^ ((uint8 *)(ea))[4] ^ ((uint8 *)(ea))[5] ^ ((uint8)(prio))) \
@@ -75,16 +82,17 @@ typedef struct dhd_pkttag_fr {
 
 struct flow_queue;
 
+/* Flow Ring Queue Enqueue overflow callback */
 typedef int (*flow_queue_cb_t)(struct flow_queue * queue, void * pkt);
 
 typedef struct flow_queue {
-	dll_t  list;                
-	void * head;                
-	void * tail;                
-	uint16 len;                 
-	uint16 max;                 
-	uint32 failures;            
-	flow_queue_cb_t cb;         
+	dll_t  list;                /* manage a flowring queue in a dll */
+	void * head;                /* first packet in the queue */
+	void * tail;                /* last packet in the queue */
+	uint16 len;                 /* number of packets in the queue */
+	uint16 max;                 /* maximum number of packets, queue may hold */
+	uint32 failures;            /* enqueue failures due to queue overflow */
+	flow_queue_cb_t cb;         /* callback invoked on threshold crossing */
 } flow_queue_t;
 
 #define flow_queue_len(queue)   ((int)(queue)->len)
@@ -101,14 +109,14 @@ typedef struct flow_info {
 } flow_info_t;
 
 typedef struct flow_ring_node {
-	dll_t		list; 
+	dll_t		list; /* manage a constructed flowring in a dll, must be at first place */
 	flow_queue_t	queue;
 	bool		active;
 	uint8		status;
 	uint16		flowid;
 	flow_info_t	flow_info;
 	void		*prot_info;
-	void		*lock; 
+	void		*lock; /* lock for flowring access protection */
 } flow_ring_node_t;
 typedef flow_ring_node_t flow_ring_table_t;
 
@@ -120,8 +128,8 @@ typedef struct flow_hash_info {
 
 typedef struct if_flow_lkup {
 	bool		status;
-	uint8		role; 
-	flow_hash_info_t *fl_hash[DHD_FLOWRING_HASH_SIZE]; 
+	uint8		role; /* Interface role: STA/AP */
+	flow_hash_info_t *fl_hash[DHD_FLOWRING_HASH_SIZE]; /* Lkup Hash table */
 } if_flow_lkup_t;
 
 static INLINE flow_ring_node_t *
@@ -130,7 +138,9 @@ dhd_constlist_to_flowring(dll_t *item)
 	return ((flow_ring_node_t *)item);
 }
 
+/* Exported API */
 
+/* Flow ring's queue management functions */
 extern void dhd_flow_queue_init(dhd_pub_t *dhdp, flow_queue_t *queue, int max);
 extern void dhd_flow_queue_register(flow_queue_t *queue, flow_queue_cb_t cb);
 extern int  dhd_flow_queue_enqueue(dhd_pub_t *dhdp, flow_queue_t *queue, void *pkt);
@@ -153,13 +163,15 @@ extern void dhd_flow_rings_delete(dhd_pub_t *dhdp, uint8 ifindex);
 extern void dhd_flow_rings_delete_for_peer(dhd_pub_t *dhdp, uint8 ifindex,
                 char *addr);
 
+/* Handle Interface ADD, DEL operations */
 extern void dhd_update_interface_flow_info(dhd_pub_t *dhdp, uint8 ifindex,
                 uint8 op, uint8 role);
 
+/* Handle a STA interface link status update */
 extern int dhd_update_interface_link_status(dhd_pub_t *dhdp, uint8 ifindex,
                 uint8 status);
 extern int dhd_flow_prio_map(dhd_pub_t *dhd, uint8 *map, bool set);
 extern int dhd_update_flow_prio_map(dhd_pub_t *dhdp, uint8 map);
 
 extern uint8 dhd_flow_rings_ifindex2role(dhd_pub_t *dhdp, uint8 ifindex);
-#endif 
+#endif /* _dhd_flowrings_h_ */

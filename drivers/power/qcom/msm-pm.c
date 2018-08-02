@@ -51,6 +51,7 @@
 #include <soc/qcom/htc_util.h>
 #include <linux/seq_file.h>
 #include <linux/qpnp/pin.h>
+/* #include <mach/devices_dtb.h> Not implemented yet*/
 #include <soc/qcom/rpm_stats.h>
 #ifdef CONFIG_PINCTRL_MSM_TLMM_V3
 #include <mach/gpio.h>
@@ -555,14 +556,14 @@ static bool msm_pm_power_collapse_standalone(
 	}
 	if (cpu_online(cpu)) {
 		if ((!from_idle) && (MSM_PM_DEBUG_RPM_STAT & msm_pm_debug_mask)){
-			msm_rpm_dump_stat();
+			msm_rpm_dump_stat(false);
 		}
 	}
 #endif
 
 	avsdscr = avs_get_avsdscr();
 	avscsr = avs_get_avscsr();
-	avs_set_avscsr(0); 
+	avs_set_avscsr(0); /* Disable AVS */
 
 #ifdef CONFIG_HTC_POWER_DEBUG
 	if ((!from_idle) && (MSM_PM_DEBUG_CLOCK & msm_pm_debug_mask))
@@ -577,7 +578,7 @@ static bool msm_pm_power_collapse_standalone(
 #ifdef CONFIG_HTC_POWER_DEBUG
 	if (cpu_online(cpu)) {
 		if ((!from_idle) && (MSM_PM_DEBUG_RPM_STAT & msm_pm_debug_mask))
-			msm_rpm_dump_stat();
+			msm_rpm_dump_stat(false);
 	}
 #endif
 	avs_set_avsdscr(avsdscr);
@@ -634,7 +635,7 @@ static bool msm_pm_power_collapse(bool from_idle)
 #ifdef CONFIG_HTC_POWER_DEBUG
 	if (cpu_online(cpu)) {
 		if ((!from_idle) && (MSM_PM_DEBUG_RPM_STAT & msm_pm_debug_mask)){
-			msm_rpm_dump_stat();
+			msm_rpm_dump_stat(false);
 		}
 	}
 #endif
@@ -662,7 +663,7 @@ static bool msm_pm_power_collapse(bool from_idle)
 	if (cpu_online(cpu)) {
 #ifdef CONFIG_HTC_POWER_DEBUG
 		if ((!from_idle) && (MSM_PM_DEBUG_RPM_STAT & msm_pm_debug_mask))
-			msm_rpm_dump_stat();
+			msm_rpm_dump_stat(false);
 		if ((!from_idle) && (MSM_PM_DEBUG_CLOCK & msm_pm_debug_mask))
 #else
 		if (MSM_PM_DEBUG_CLOCK & msm_pm_debug_mask)
@@ -739,9 +740,9 @@ bool msm_cpu_pm_enter_sleep(enum msm_pm_sleep_mode mode, bool from_idle)
 
 #ifdef CONFIG_HTC_POWER_DEBUG
         if(from_idle){
-                
+                //if((get_kernel_flag() & KERNEL_FLAG_PM_MONITOR) || !(get_kernel_flag() & KERNEL_FLAG_TE
                         htc_idle_stat_add(mode, (u32)time);
-                
+                //}
         }
 #endif
 
@@ -1111,6 +1112,10 @@ static int msm_pm_htc_footprint_init(void)
 	pr_info("%s: msm_pm_boot_vector 0x%p", __func__, (void *)&msm_pm_boot_vector);
 	store_pm_boot_vector_addr((u64)&msm_pm_boot_vector);
 
+	/* CPU0 is turned on before running kernel,
+	 * it would not go through msm_pm_spm_power_collapse.
+	 * We need to initiate CPU0 low power footprint here.
+	 */
 	clean_reset_vector_debug_info(0);
 	init_cpu_foot_print(0, false, true);
 	set_cpu_foot_print(0, 0xb);

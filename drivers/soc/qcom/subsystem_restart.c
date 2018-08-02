@@ -58,6 +58,15 @@ static uint disable_ssr_check_work = 0;
 module_param(disable_ssr_check_work, uint, S_IRUGO | S_IWUSR);
 #endif
 
+/**
+ * enum p_subsys_state - state of a subsystem (private)
+ * @SUBSYS_NORMAL: subsystem is operating normally
+ * @SUBSYS_CRASHED: subsystem has crashed and hasn't been shutdown
+ * @SUBSYS_RESTARTING: subsystem has been shutdown and is now restarting
+ *
+ * The 'private' side of the subsytem state used to determine where in the
+ * restart process the subsystem is.
+ */
 enum p_subsys_state {
 	SUBSYS_NORMAL,
 	SUBSYS_CRASHED,
@@ -94,6 +103,9 @@ static const char * const enable_ramdumps[] = {
 #endif
 
 #if defined(CONFIG_HTC_DEBUG_SSR)
+/**
+ * MSS restart reason feature (Non-block)
+ */
 
 #define SUBSYS_NAME_MAX_LENGTH 40
 #define RD_BUF_SIZE			  256
@@ -116,7 +128,7 @@ static ssize_t subsystem_restart_reason_nonblock_show(struct kobject *kobj,
 
 	for( i=0; i<MODEM_ERRMSG_LIST_LEN; i++ ) {
 		if( msr_info_list[i].valid != 0 ) {
-			
+			//Copy errmsg to buf
 			snprintf(tmp, RD_BUF_SIZE+30, "%ld-%s|\n\r", msr_info_list[i].msr_time.tv_sec, msr_info_list[i].modem_errmsg);
 			strcat(buf, tmp);
 			memset(tmp, 0, RD_BUF_SIZE+30);
@@ -172,6 +184,17 @@ static inline void dump_busy_task(void);
 static inline void dump_disk_sleep_task(void);
 #endif
 
+/**
+ * struct subsys_tracking - track state of a subsystem or restart order
+ * @p_state: private state of subsystem/order
+ * @state: public state of subsystem/order
+ * @s_lock: protects p_state
+ * @lock: protects subsystem/order callbacks and state
+ *
+ * Tracks the state of a subsystem or a set of subsystems (restart order).
+ * Doing this avoids the need to grab each subsystem's lock and update
+ * each subsystems state when restarting an order.
+ */
 struct subsys_tracking {
 	enum p_subsys_state p_state;
 	spinlock_t s_lock;
@@ -217,6 +240,7 @@ struct restart_log {
  * @restart_level: restart level (0 - panic, 1 - related, 2 - independent, etc.)
  * @restart_order: order of other devices this devices restarts with
  * @crash_count: number of times the device has crashed
+ * @dentry: debugfs directory for this device
  * @do_ramdump_on_put: ramdump on subsystem_put() if true
  * @err_ready: completion variable to record error ready from subsystem
  * @crashed: indicates if subsystem has crashed
@@ -262,7 +286,7 @@ static inline void dump_busy_task(void)
 {
 	struct task_struct *g, *p;
 	struct timespec ts;
-	
+	//scan busy tasks
 	ts = ktime_to_timespec(ktime_get());
 	printk("Scan busy tasks =======START ========== ktime_get = %d.%d \n", (int)ts.tv_sec, (int)ts.tv_nsec);
 	do_each_thread(g, p) {
@@ -285,7 +309,7 @@ static inline void dump_disk_sleep_task(void)
 {
 	struct task_struct *g, *p;
 	struct timespec ts;
-	
+	//scan busy tasks
 	ts = ktime_to_timespec(ktime_get());
 	printk("Scan disk sleep tasks =======START ========== ktime_get = %d.%d \n", (int)ts.tv_sec, (int)ts.tv_nsec);
 	do_each_thread(g, p) {
@@ -348,7 +372,7 @@ static void subsystem_restart_check_func(struct work_struct *work)
 	printk("[<%p>][%s]: Check Busy task end.\n", current, __func__);
 
 }
-#endif
+#endif//CONFIG_HTC_DEBUG_RIL_PCN0009_SSR_DUMP_TASK
 
 static struct subsys_device *to_subsys(struct device *d)
 {
@@ -517,7 +541,7 @@ void subsys_set_restart_reason(struct subsys_device *dev, const char* reason)
 	snprintf(dev->restart_reason, sizeof(dev->restart_reason) - 1, "%s", reason);
 }
 EXPORT_SYMBOL(subsys_set_restart_reason);
-#endif 
+#endif /* CONFIG_HTC_DEBUG_SSR */
 
 static ssize_t crashed_show(struct device *dev, struct device_attribute *attr,
 		char *buf)
@@ -1183,7 +1207,7 @@ static void __subsystem_restart_dev(struct subsys_device *dev)
 	unsigned long flags;
 
 #if defined(CONFIG_HTC_DEBUG_SSR)
-		
+		/*+SSD-RIL for nonblock restart reason	*/
 		if (!strncmp(name, "modem",
 					SUBSYS_NAME_MAX_LENGTH)) {
 		msr_info_list[msm_msr_index].valid = 1;
@@ -1192,7 +1216,7 @@ static void __subsystem_restart_dev(struct subsys_device *dev)
 		if(++msm_msr_index >= MODEM_ERRMSG_LIST_LEN)
 		msm_msr_index = 0;
 			}
-	   
+	   /*-SSD-RIL for nonblock restart reason	*/
 #endif
 
 #if defined(CONFIG_HTC_FEATURES_SSR)
@@ -1901,7 +1925,7 @@ static int __init subsys_restart_init(void)
 	int ret;
 #if defined(CONFIG_HTC_DEBUG_SSR)
 		struct kobject *properties_kobj;
-		
+		/*+SSD-RIL for nonblock restart reason	*/
 		subsystem_restart_reason_nonblock_init();
 		properties_kobj = kobject_create_and_add("subsystem_restart_properties", NULL);
 		if (properties_kobj) {
@@ -1911,7 +1935,7 @@ static int __init subsys_restart_init(void)
 				return ret;
 			}
 		}
-		
+		/*-SSD-RIL for nonblock restart reason	*/
 #endif
 	ssr_wq = alloc_workqueue("ssr_wq", WQ_CPU_INTENSIVE, 0);
 	BUG_ON(!ssr_wq);

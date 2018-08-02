@@ -450,18 +450,28 @@ struct msm_smem *msm_smem_user_to_kernel(void *clt, int fd, u32 offset,
 	return mem;
 }
 
-bool msm_smem_compare_buffers(void *clt, int fd, void *priv) {
+int8_t msm_smem_compare_buffers(void *clt, int fd, void *priv)
+{
 	struct smem_client *client = clt;
 	struct ion_handle *handle = NULL;
-	bool ret = false;
-
+	int8_t ret = 0;
+	/* HTC_VIDEO_START : Add NULL check for prevent KP */
 	if (!clt || !priv) {
-		dprintk(VIDC_ERR, "Invalid params: %p, %p\n",clt, priv);
-		return false;
+		dprintk(VIDC_ERR, "Invalid params: %p, %p\n",
+			clt, priv);
+		return 0;
 	}
+	/* HTC_VIDEO_END */
 	handle = ion_import_dma_buf(client->clnt, fd);
+	/* HTC_VIDEO_START : Add NULL check for prevent KP */
+	if (IS_ERR_OR_NULL(handle)) {
+		dprintk(VIDC_ERR, "Failed to get ion handle: %p for fd: %d clnt: %p\n",
+			handle, fd, priv);
+		return -ENOMEM;
+	}
+	/* HTC_VIDEO_END */
 	ret = handle == priv;
-	(!IS_ERR_OR_NULL(handle)) ? ion_free(client->clnt, handle) : 0;
+	handle ? ion_free(client->clnt, handle) : 0;
 	return ret;
 }
 

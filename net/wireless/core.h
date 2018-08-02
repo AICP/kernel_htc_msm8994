@@ -90,11 +90,11 @@ struct cfg80211_registered_device {
 	/* netlink port which started critical protocol (0 means not started) */
 	u32 crit_proto_nlportid;
 
-    
+    /* HTC_WIFI_START */
     spinlock_t destroy_list_lock;
     struct list_head destroy_list;
     struct work_struct destroy_work;
-    
+    /* HTC_WIFI_END */
 
 	/* must be last because of the way we do wiphy_priv(),
 	 * and it should at least be aligned to NETDEV_ALIGN */
@@ -274,12 +274,14 @@ struct cfg80211_beacon_registration {
 	u32 nlportid;
 };
 
+/* HTC_WIFI_START */
 struct cfg80211_iface_destroy {
    struct list_head list;
    u32 nlportid;
 };
 
 void cfg80211_destroy_ifaces(struct cfg80211_registered_device *rdev);
+/* HTC_WIFI_END */
 
 /* free object */
 extern void cfg80211_dev_free(struct cfg80211_registered_device *rdev);

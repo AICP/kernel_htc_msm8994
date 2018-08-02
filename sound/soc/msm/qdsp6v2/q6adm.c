@@ -27,11 +27,13 @@
 #include "msm-dts-srs-tm-config.h"
 #include <sound/adsp_err.h>
 
+//htc audio ++
 #include <linux/delay.h>
 #undef pr_info
 #undef pr_err
 #define pr_info(fmt, ...) pr_aud_info(fmt, ##__VA_ARGS__)
 #define pr_err(fmt, ...) pr_aud_err(fmt, ##__VA_ARGS__)
+//htc audio --
 
 
 #define TIMEOUT_MS 1000
@@ -113,7 +115,9 @@ static int adm_get_parameters[MAX_COPPS_PER_PORT * ADM_GET_PARAMETER_LENGTH];
 static int adm_module_topo_list[
 	MAX_COPPS_PER_PORT * ADM_GET_TOPO_MODULE_LIST_LENGTH];
 
+//HTC_AUD_START
 extern void msm_dolby_ssr_reset(void);
+//HTC_AUD_END
 
 int adm_validate_and_get_port_index(int port_id)
 {
@@ -1366,7 +1370,9 @@ static int32_t adm_callback(struct apr_client_data *data, void *priv)
 			data->reset_event, data->reset_proc, this_adm.apr);
 		if (this_adm.apr) {
 			apr_reset(this_adm.apr);
+//HTC_AUD_START
 			msm_dolby_ssr_reset();
+//HTC_AUD_END
 			for (i = 0; i < AFE_MAX_PORTS; i++) {
 				for (j = 0; j < MAX_COPPS_PER_PORT; j++) {
 					atomic_set(&this_adm.copp.id[i][j],
@@ -2089,7 +2095,7 @@ static int get_cal_path(int path)
 static void send_adm_cal(int port_id, int copp_idx, int path, int perf_mode,
 			 int app_type, int acdb_id, int sample_rate)
 {
-	pr_info("%s:port id 0x%x copp_idx %d\n", __func__,(unsigned int)port_id, copp_idx);
+	pr_debug("%s:port id 0x%x copp_idx %d\n", __func__,(unsigned int)port_id, copp_idx); //HTC_AUDIO
 
 	send_adm_cal_type(ADM_AUDPROC_CAL, path, port_id, copp_idx, perf_mode,
 			  app_type, acdb_id, sample_rate);
@@ -2252,10 +2258,12 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 	pr_info("%s:port %#x path:%d rate:%d mode:%d perf_mode:%d,topo_id %d\n",
 		 __func__, port_id, path, rate, channel_mode, perf_mode,
 		 topology);
+//htc audio ++
 	if(port_id == RT_PROXY_PORT_001_RX || port_id == RT_PROXY_PORT_001_TX) {
-		pr_info("%s: proxy port, use null copp\n",__func__);
+		pr_debug("%s: proxy port, use null copp\n",__func__);
 		topology = NULL_COPP_TOPOLOGY;
 	}
+//htc audio --
 
 	/* For DTS EAGLE only, force 24 bit */
 	if ((topology == ADM_CMD_COPP_OPEN_TOPOLOGY_ID_DTS_HPX) &&
@@ -2289,9 +2297,10 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 	} else if (perf_mode == LOW_LATENCY_PCM_MODE) {
 		flags = ADM_LOW_LATENCY_DEVICE_SESSION;
 		if ((topology == DOLBY_ADM_COPP_TOPOLOGY_ID) ||
-		    (topology == AFE_COPP_ID_AUDIO_SPHERE) || 
+		    (topology == AFE_COPP_ID_AUDIO_SPHERE) || //htc audio
 		    (topology == DS2_ADM_COPP_TOPOLOGY_ID) ||
 		    (topology == SRS_TRUMEDIA_TOPOLOGY_ID) ||
+		    (topology == HTC_SRS_TOPOLOGY_ID) || // HTC_AUD
 		    (topology == ADM_CMD_COPP_OPEN_TOPOLOGY_ID_DTS_HPX))
 			topology = DEFAULT_COPP_TOPOLOGY;
 	} else {
@@ -2347,7 +2356,8 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 	if (atomic_read(&this_adm.copp.cnt[port_idx][copp_idx]) == 0) {
 		pr_debug("%s: open ADM: port_idx: %d, copp_idx: %d\n", __func__,
 			 port_idx, copp_idx);
-	if ((topology == SRS_TRUMEDIA_TOPOLOGY_ID) &&
+	if (((topology == SRS_TRUMEDIA_TOPOLOGY_ID) ||
+		    (topology == HTC_SRS_TOPOLOGY_ID)) &&  // HTC_AUD
 	     perf_mode == LEGACY_PCM_MODE) {
 		int res;
 		atomic_set(&this_adm.mem_map_cal_index, ADM_SRS_TRUMEDIA);
@@ -2544,12 +2554,14 @@ int adm_matrix_map(int path, struct route_payload payload_map, int perf_mode)
 			port_idx = afe_get_port_index(payload_map.port_id[i]);
 			copp_idx = payload_map.copp_idx[i];
 
+//htc audio ++
 			if (port_idx < 0 || port_idx >= AFE_MAX_PORTS) {
 				pr_err("%s: Invalid port idx %d port_id 0x%x\n",
 				__func__, port_idx, payload_map.port_id[i]);
 				ret = -EINVAL;
 				goto fail_cmd;
 			}
+//htc aduio --
 			if (atomic_read(
 				&this_adm.copp.topology[port_idx][copp_idx]) ==
 				ADM_CMD_COPP_OPEN_TOPOLOGY_ID_DTS_HPX)
@@ -2628,23 +2640,27 @@ int adm_close(int port_id, int perf_mode, int copp_idx)
 
 	atomic_dec(&this_adm.copp.cnt[port_idx][copp_idx]);
 	if (!(atomic_read(&this_adm.copp.cnt[port_idx][copp_idx]))) {
+//htc audio ++ //TODO: QCT doens't implement adm latency fucniton yet, so workaround for afe pop by fixed value dealy
 		if(perf_mode == LEGACY_PCM_MODE) {
 			if(atomic_read(&this_adm.copp.topology[port_idx][copp_idx]) == AFE_COPP_ID_AUDIO_SPHERE) {
-				pr_info("%s: close adm 0x%x, topology 0x%x sleep for 50ms\n",__func__,port_id, \
+				pr_debug("%s: close adm 0x%x, topology 0x%x sleep for 50ms\n",__func__,port_id, \
 					atomic_read(&this_adm.copp.topology[port_idx][copp_idx]));
 				usleep_range(50000,50000);
 			} else if(atomic_read(&this_adm.copp.topology[port_idx][copp_idx]) == DOLBY_ADM_COPP_TOPOLOGY_ID) {
-				pr_info("%s: close adm 0x%x, topology 0x%x sleep for 40ms\n",__func__,port_id, \
+				pr_debug("%s: close adm 0x%x, topology 0x%x sleep for 40ms\n",__func__,port_id, \
 					atomic_read(&this_adm.copp.topology[port_idx][copp_idx]));
 				usleep_range(40000,40000);
 			}
 		}
+//htc audio --
 		copp_id = adm_get_copp_id(port_idx, copp_idx);
 		pr_debug("%s: Closing ADM port_idx:%d copp_idx:%d copp_id:0x%x\n",
 			 __func__, port_idx, copp_idx, copp_id);
 		if ((!perf_mode) && (this_adm.outband_memmap.paddr != 0) &&
+		    ((atomic_read(&this_adm.copp.topology[port_idx][copp_idx]) ==
+			SRS_TRUMEDIA_TOPOLOGY_ID)||
 		    (atomic_read(&this_adm.copp.topology[port_idx][copp_idx]) ==
-			SRS_TRUMEDIA_TOPOLOGY_ID)) {
+			HTC_SRS_TOPOLOGY_ID))) { // HTC_AUD
 			atomic_set(&this_adm.mem_map_cal_index,
 				ADM_SRS_TRUMEDIA);
 			ret = adm_memory_unmap_regions();

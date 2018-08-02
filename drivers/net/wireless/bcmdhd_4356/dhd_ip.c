@@ -40,18 +40,20 @@
 #include <dhd_bus.h>
 #include <dhd_proto.h>
 #include <proto/bcmtcp.h>
-#endif 
+#endif /* DHDTCPACK_SUPPRESS */
 
+/* special values */
+/* 802.3 llc/snap header */
 static const uint8 llc_snap_hdr[SNAP_HDR_LEN] = {0xaa, 0xaa, 0x03, 0x00, 0x00, 0x00};
 
 pkt_frag_t pkt_frag_info(osl_t *osh, void *p)
 {
 	uint8 *frame;
 	int length;
-	uint8 *pt;			
+	uint8 *pt;			/* Pointer to type field */
 	uint16 ethertype;
-	struct ipv4_hdr *iph;		
-	int ipl;			
+	struct ipv4_hdr *iph;		/* IP frame pointer */
+	int ipl;			/* IP frame length */
 	uint16 iph_frag;
 
 	ASSERT(osh && p);
@@ -59,12 +61,12 @@ pkt_frag_t pkt_frag_info(osl_t *osh, void *p)
 	frame = PKTDATA(osh, p);
 	length = PKTLEN(osh, p);
 
-	
+	/* Process Ethernet II or SNAP-encapsulated 802.3 frames */
 	if (length < ETHER_HDR_LEN) {
 		DHD_INFO(("%s: short eth frame (%d)\n", __FUNCTION__, length));
 		return DHD_PKT_FRAG_NONE;
 	} else if (ntoh16(*(uint16 *)(frame + ETHER_TYPE_OFFSET)) >= ETHER_TYPE_MIN) {
-		
+		/* Frame is Ethernet II */
 		pt = frame + ETHER_TYPE_OFFSET;
 	} else if (length >= ETHER_HDR_LEN + SNAP_HDR_LEN + ETHER_TYPE_LEN &&
 	           !bcmp(llc_snap_hdr, frame + ETHER_HDR_LEN, SNAP_HDR_LEN)) {
@@ -76,7 +78,7 @@ pkt_frag_t pkt_frag_info(osl_t *osh, void *p)
 
 	ethertype = ntoh16(*(uint16 *)pt);
 
-	
+	/* Skip VLAN tag, if any */
 	if (ethertype == ETHER_TYPE_8021Q) {
 		pt += VLAN_TAG_LEN;
 
@@ -97,7 +99,7 @@ pkt_frag_t pkt_frag_info(osl_t *osh, void *p)
 	iph = (struct ipv4_hdr *)(pt + ETHER_TYPE_LEN);
 	ipl = (uint)(length - (pt + ETHER_TYPE_LEN - frame));
 
-	
+	/* We support IPv4 only */
 	if ((ipl < IPV4_OPTIONS_OFFSET) || (IP_VER(iph) != IP_VER_4)) {
 		DHD_INFO(("%s: short frame (%d) or non-IPv4\n", __FUNCTION__, ipl));
 		return DHD_PKT_FRAG_NONE;
@@ -118,10 +120,10 @@ bool pkt_is_dhcp(osl_t *osh, void *p)
 {
 	uint8 *frame;
 	int length;
-	uint8 *pt;			
+	uint8 *pt;			/* Pointer to type field */
 	uint16 ethertype;
-	struct ipv4_hdr *iph;		
-	int ipl;			
+	struct ipv4_hdr *iph;		/* IP frame pointer */
+	int ipl;			/* IP frame length */
 	uint16 src_port;
 
 	ASSERT(osh && p);
@@ -129,12 +131,12 @@ bool pkt_is_dhcp(osl_t *osh, void *p)
 	frame = PKTDATA(osh, p);
 	length = PKTLEN(osh, p);
 
-	
+	/* Process Ethernet II or SNAP-encapsulated 802.3 frames */
 	if (length < ETHER_HDR_LEN) {
 		DHD_INFO(("%s: short eth frame (%d)\n", __FUNCTION__, length));
 		return FALSE;
 	} else if (ntoh16(*(uint16 *)(frame + ETHER_TYPE_OFFSET)) >= ETHER_TYPE_MIN) {
-		
+		/* Frame is Ethernet II */
 		pt = frame + ETHER_TYPE_OFFSET;
 	} else if (length >= ETHER_HDR_LEN + SNAP_HDR_LEN + ETHER_TYPE_LEN &&
 	           !bcmp(llc_snap_hdr, frame + ETHER_HDR_LEN, SNAP_HDR_LEN)) {
@@ -146,7 +148,7 @@ bool pkt_is_dhcp(osl_t *osh, void *p)
 
 	ethertype = ntoh16(*(uint16 *)pt);
 
-	
+	/* Skip VLAN tag, if any */
 	if (ethertype == ETHER_TYPE_8021Q) {
 		pt += VLAN_TAG_LEN;
 
@@ -167,7 +169,7 @@ bool pkt_is_dhcp(osl_t *osh, void *p)
 	iph = (struct ipv4_hdr *)(pt + ETHER_TYPE_LEN);
 	ipl = (uint)(length - (pt + ETHER_TYPE_LEN - frame));
 
-	
+	/* We support IPv4 only */
 	if ((ipl < (IPV4_OPTIONS_OFFSET + 2)) || (IP_VER(iph) != IP_VER_4)) {
 		DHD_INFO(("%s: short frame (%d) or non-IPv4\n", __FUNCTION__, ipl));
 		return FALSE;
@@ -181,8 +183,8 @@ bool pkt_is_dhcp(osl_t *osh, void *p)
 #ifdef DHDTCPACK_SUPPRESS
 
 typedef struct {
-	void *pkt_in_q;		
-	void *pkt_ether_hdr;	
+	void *pkt_in_q;		/* TCP ACK packet that is already in txq or DelayQ */
+	void *pkt_ether_hdr;	/* Ethernet header pointer of pkt_in_q */
 	int ifidx;
 	uint8 supp_cnt;
 	dhd_pub_t *dhdp;
@@ -190,35 +192,36 @@ typedef struct {
 } tcpack_info_t;
 
 typedef struct _tdata_psh_info_t {
-	uint32 end_seq;			
-	struct _tdata_psh_info_t *next;	
+	uint32 end_seq;			/* end seq# of a received TCP PSH DATA pkt */
+	struct _tdata_psh_info_t *next;	/* next pointer of the link chain */
 } tdata_psh_info_t;
 
 typedef struct {
-	uint8 src_ip_addr[IPV4_ADDR_LEN];	
-	uint8 dst_ip_addr[IPV4_ADDR_LEN];	
-	uint8 src_tcp_port[TCP_PORT_LEN];	
-	uint8 dst_tcp_port[TCP_PORT_LEN];	
-	tdata_psh_info_t *tdata_psh_info_head;	
-	tdata_psh_info_t *tdata_psh_info_tail;	
-	uint32 last_used_time;	
+	uint8 src_ip_addr[IPV4_ADDR_LEN];	/* SRC ip addrs of this TCP stream */
+	uint8 dst_ip_addr[IPV4_ADDR_LEN];	/* DST ip addrs of this TCP stream */
+	uint8 src_tcp_port[TCP_PORT_LEN];	/* SRC tcp ports of this TCP stream */
+	uint8 dst_tcp_port[TCP_PORT_LEN];	/* DST tcp ports of this TCP stream */
+	tdata_psh_info_t *tdata_psh_info_head;	/* Head of received TCP PSH DATA chain */
+	tdata_psh_info_t *tdata_psh_info_tail;	/* Tail of received TCP PSH DATA chain */
+	uint32 last_used_time;	/* The last time this tcpdata_info was used(in ms) */
 } tcpdata_info_t;
 
+/* TCPACK SUPPRESS module */
 typedef struct {
 	int tcpack_info_cnt;
-	tcpack_info_t tcpack_info_tbl[TCPACK_INFO_MAXNUM];	
+	tcpack_info_t tcpack_info_tbl[TCPACK_INFO_MAXNUM];	/* Info of TCP ACK to send */
 	int tcpdata_info_cnt;
-	tcpdata_info_t tcpdata_info_tbl[TCPDATA_INFO_MAXNUM];	
-	tdata_psh_info_t *tdata_psh_info_pool;	
-	tdata_psh_info_t *tdata_psh_info_free;	
+	tcpdata_info_t tcpdata_info_tbl[TCPDATA_INFO_MAXNUM];	/* Info of received TCP DATA */
+	tdata_psh_info_t *tdata_psh_info_pool;	/* Pointer to tdata_psh_info elements pool */
+	tdata_psh_info_t *tdata_psh_info_free;	/* free tdata_psh_info elements chain in pool */
 #ifdef DHDTCPACK_SUP_DBG
-	int psh_info_enq_num;	
-#endif 
+	int psh_info_enq_num;	/* Number of free TCP PSH DATA info elements in pool */
+#endif /* DHDTCPACK_SUP_DBG */
 } tcpack_sup_module_t;
 
 #if defined(DEBUG_COUNTER) && defined(DHDTCPACK_SUP_DBG)
 counter_tbl_t tack_tbl = {"tcpACK", 0, 1000, 10, {0, }, 1};
-#endif 
+#endif /* DEBUG_COUNTER && DHDTCPACK_SUP_DBG */
 
 static void
 _tdata_psh_info_pool_enq(tcpack_sup_module_t *tcpack_sup_mod,
@@ -257,7 +260,7 @@ _tdata_psh_info_pool_deq(tcpack_sup_module_t *tcpack_sup_mod)
 		tdata_psh_info->next = NULL;
 #ifdef DHDTCPACK_SUP_DBG
 		tcpack_sup_mod->psh_info_enq_num--;
-#endif 
+#endif /* DHDTCPACK_SUP_DBG */
 	}
 
 	return tdata_psh_info;
@@ -285,9 +288,9 @@ static int _tdata_psh_info_pool_init(dhd_pub_t *dhdp,
 	bzero(tdata_psh_info_pool, sizeof(tdata_psh_info_t) * TCPDATA_PSH_INFO_MAXNUM);
 #ifdef DHDTCPACK_SUP_DBG
 	tcpack_sup_mod->psh_info_enq_num = 0;
-#endif 
+#endif /* DHDTCPACK_SUP_DBG */
 
-	
+	/* Enqueue newly allocated tcpdata psh info elements to the pool */
 	for (i = 0; i < TCPDATA_PSH_INFO_MAXNUM; i++)
 		_tdata_psh_info_pool_enq(tcpack_sup_mod, &tdata_psh_info_pool[i]);
 
@@ -313,7 +316,7 @@ static void _tdata_psh_info_pool_deinit(dhd_pub_t *dhdp,
 
 	for (i = 0; i < tcpack_sup_mod->tcpdata_info_cnt; i++) {
 		tcpdata_info_t *tcpdata_info = &tcpack_sup_mod->tcpdata_info_tbl[i];
-		
+		/* Return tdata_psh_info elements allocated to each tcpdata_info to the pool */
 		while ((tdata_psh_info = tcpdata_info->tdata_psh_info_head)) {
 			tcpdata_info->tdata_psh_info_head = tdata_psh_info->next;
 			tdata_psh_info->next = NULL;
@@ -324,10 +327,10 @@ static void _tdata_psh_info_pool_deinit(dhd_pub_t *dhdp,
 #ifdef DHDTCPACK_SUP_DBG
 	DHD_ERROR(("%s %d: PSH INFO ENQ %d\n",
 		__FUNCTION__, __LINE__, tcpack_sup_mod->psh_info_enq_num));
-#endif 
+#endif /* DHDTCPACK_SUP_DBG */
 
 	i = 0;
-	
+	/* Be sure we recollected all tdata_psh_info elements */
 	while ((tdata_psh_info = tcpack_sup_mod->tdata_psh_info_free)) {
 		tcpack_sup_mod->tdata_psh_info_free = tdata_psh_info->next;
 		tdata_psh_info->next = NULL;
@@ -407,15 +410,15 @@ int dhd_tcpack_suppress_set(dhd_pub_t *dhdp, uint8 mode)
 	DHD_TRACE(("%s: %d -> %d\n",
 		__FUNCTION__, dhdp->tcpack_sup_mode, mode));
 
-	
+	/* Old tcpack_sup_mode is TCPACK_SUP_DELAYTX */
 	if (dhdp->tcpack_sup_mode == TCPACK_SUP_DELAYTX) {
 		tcpack_sup_module_t *tcpack_sup_mod = dhdp->tcpack_sup_module;
-		
+		/* We won't need tdata_psh_info pool and tcpddata_info_tbl anymore */
 		_tdata_psh_info_pool_deinit(dhdp, tcpack_sup_mod);
 		tcpack_sup_mod->tcpdata_info_cnt = 0;
 		bzero(tcpack_sup_mod->tcpdata_info_tbl,
 			sizeof(tcpdata_info_t) * TCPDATA_INFO_MAXNUM);
-		
+		/* For half duplex bus interface, tx precedes rx by default */
 		if (dhdp->bus)
 			dhd_bus_set_dotxinrx(dhdp->bus, TRUE);
 	}
@@ -559,7 +562,7 @@ inline int dhd_tcpack_check_xmit(dhd_pub_t *dhdp, void *pkt)
 		if (tcpack_info_tbl[i].pkt_in_q == pkt) {
 			DHD_TRACE(("%s %d: pkt %p sent out. idx %d, tbl_cnt %d\n",
 				__FUNCTION__, __LINE__, pkt, i, tbl_cnt));
-			
+			/* This pkt is being transmitted so remove the tcp_ack_info of it. */
 			if (i < tbl_cnt - 1) {
 				bcopy(&tcpack_info_tbl[tbl_cnt - 1],
 					&tcpack_info_tbl[i], sizeof(tcpack_info_t));
@@ -615,7 +618,7 @@ static INLINE bool dhd_tcpdata_psh_acked(dhd_pub_t *dhdp, uint8 *ip_hdr,
 			ntoh16_ua(tcpdata_info_tmp->src_tcp_port),
 			ntoh16_ua(tcpdata_info_tmp->dst_tcp_port)));
 
-		
+		/* If either IP address or TCP port number does not match, skip. */
 		if (memcmp(&ip_hdr[IPV4_SRC_IP_OFFSET],
 			tcpdata_info_tmp->dst_ip_addr, IPV4_ADDR_LEN) == 0 &&
 			memcmp(&ip_hdr[IPV4_DEST_IP_OFFSET],
@@ -655,7 +658,7 @@ static INLINE bool dhd_tcpdata_psh_acked(dhd_pub_t *dhdp, uint8 *ip_hdr,
 #ifdef DHDTCPACK_SUP_DBG
 	DHD_TRACE(("%s %d: PSH INFO ENQ %d\n",
 		__FUNCTION__, __LINE__, tcpack_sup_mod->psh_info_enq_num));
-#endif 
+#endif /* DHDTCPACK_SUP_DBG */
 
 exit:
 	return ret;
@@ -664,15 +667,15 @@ exit:
 bool
 dhd_tcpack_suppress(dhd_pub_t *dhdp, void *pkt)
 {
-	uint8 *new_ether_hdr;	
-	uint16 new_ether_type;	
-	uint8 *new_ip_hdr;		
-	uint8 *new_tcp_hdr;		
-	uint32 new_ip_hdr_len;	
+	uint8 *new_ether_hdr;	/* Ethernet header of the new packet */
+	uint16 new_ether_type;	/* Ethernet type of the new packet */
+	uint8 *new_ip_hdr;		/* IP header of the new packet */
+	uint8 *new_tcp_hdr;		/* TCP header of the new packet */
+	uint32 new_ip_hdr_len;	/* IP header length of the new packet */
 	uint32 cur_framelen;
-	uint32 new_tcp_ack_num;		
-	uint16 new_ip_total_len;	
-	uint32 new_tcp_hdr_len;		
+	uint32 new_tcp_ack_num;		/* TCP acknowledge number of the new packet */
+	uint16 new_ip_total_len;	/* Total length of IP packet for the new packet */
+	uint32 new_tcp_hdr_len;		/* TCP header length of the new packet */
 	tcpack_sup_module_t *tcpack_sup_mod;
 	tcpack_info_t *tcpack_info_tbl;
 	int i;
@@ -722,7 +725,7 @@ dhd_tcpack_suppress(dhd_pub_t *dhdp, void *pkt)
 
 	DHD_TRACE(("%s %d: TCP pkt!\n", __FUNCTION__, __LINE__));
 
-	
+	/* is it an ack ? Allow only ACK flag, not to suppress others. */
 	if (new_tcp_hdr[TCP_FLAGS_OFFSET] != TCP_FLAG_ACK) {
 		DHD_TRACE(("%s %d: Do not touch TCP flag 0x%x\n",
 			__FUNCTION__, __LINE__, new_tcp_hdr[TCP_FLAGS_OFFSET]));
@@ -732,7 +735,7 @@ dhd_tcpack_suppress(dhd_pub_t *dhdp, void *pkt)
 	new_ip_total_len = ntoh16_ua(&new_ip_hdr[IPV4_PKTLEN_OFFSET]);
 	new_tcp_hdr_len = 4 * TCP_HDRLEN(new_tcp_hdr[TCP_HLEN_OFFSET]);
 
-	
+	/* This packet has TCP data, so just send */
 	if (new_ip_total_len > new_ip_hdr_len + new_tcp_hdr_len) {
 		DHD_TRACE(("%s %d: Do nothing for TCP DATA\n", __FUNCTION__, __LINE__));
 		goto exit;
@@ -750,12 +753,12 @@ dhd_tcpack_suppress(dhd_pub_t *dhdp, void *pkt)
 		ntoh16_ua(&new_tcp_hdr[TCP_SRC_PORT_OFFSET]),
 		ntoh16_ua(&new_tcp_hdr[TCP_DEST_PORT_OFFSET])));
 
-	
+	/* Look for tcp_ack_info that has the same ip src/dst addrs and tcp src/dst ports */
 	flags = dhd_os_tcpacklock(dhdp);
 #if defined(DEBUG_COUNTER) && defined(DHDTCPACK_SUP_DBG)
 	counter_printlog(&tack_tbl);
 	tack_tbl.cnt[0]++;
-#endif 
+#endif /* DEBUG_COUNTER && DHDTCPACK_SUP_DBG */
 
 	tcpack_sup_mod = dhdp->tcpack_sup_module;
 	tcpack_info_tbl = tcpack_sup_mod->tcpack_info_tbl;
@@ -768,18 +771,18 @@ dhd_tcpack_suppress(dhd_pub_t *dhdp, void *pkt)
 	}
 
 	if (dhd_tcpdata_psh_acked(dhdp, new_ip_hdr, new_tcp_hdr, new_tcp_ack_num)) {
-		
+		/* This TCPACK is ACK to TCPDATA PSH pkt, so keep set_dotxinrx TRUE */
 #if defined(DEBUG_COUNTER) && defined(DHDTCPACK_SUP_DBG)
 		tack_tbl.cnt[5]++;
-#endif 
+#endif /* DEBUG_COUNTER && DHDTCPACK_SUP_DBG */
 	} else
 		set_dotxinrx = FALSE;
 
 	for (i = 0; i < tcpack_sup_mod->tcpack_info_cnt; i++) {
-		void *oldpkt;	
+		void *oldpkt;	/* TCPACK packet that is already in txq or DelayQ */
 		uint8 *old_ether_hdr, *old_ip_hdr, *old_tcp_hdr;
 		uint32 old_ip_hdr_len, old_tcp_hdr_len;
-		uint32 old_tcpack_num;	
+		uint32 old_tcpack_num;	/* TCP ACK number of old TCPACK packet in Q */
 
 		if ((oldpkt = tcpack_info_tbl[i].pkt_in_q) == NULL) {
 			DHD_ERROR(("%s %d: Unexpected error!! cur idx %d, ttl cnt %d\n",
@@ -806,7 +809,7 @@ dhd_tcpack_suppress(dhd_pub_t *dhdp, void *pkt)
 			ntoh16_ua(&old_tcp_hdr[TCP_SRC_PORT_OFFSET]),
 			ntoh16_ua(&old_tcp_hdr[TCP_DEST_PORT_OFFSET])));
 
-		
+		/* If either of IP address or TCP port number does not match, skip. */
 		if (memcmp(&new_ip_hdr[IPV4_SRC_IP_OFFSET],
 			&old_ip_hdr[IPV4_SRC_IP_OFFSET], IPV4_ADDR_LEN * 2) ||
 			memcmp(&new_tcp_hdr[TCP_SRC_PORT_OFFSET],
@@ -816,7 +819,7 @@ dhd_tcpack_suppress(dhd_pub_t *dhdp, void *pkt)
 		old_tcpack_num = ntoh32_ua(&old_tcp_hdr[TCP_ACK_NUM_OFFSET]);
 
 		if (IS_TCPSEQ_GT(new_tcp_ack_num, old_tcpack_num)) {
-			
+			/* New packet has higher TCP ACK number, so it replaces the old packet */
 			if (new_ip_hdr_len == old_ip_hdr_len &&
 				new_tcp_hdr_len == old_tcp_hdr_len) {
 				ASSERT(memcmp(new_ether_hdr, old_ether_hdr, ETHER_HDR_LEN) == 0);
@@ -826,12 +829,12 @@ dhd_tcpack_suppress(dhd_pub_t *dhdp, void *pkt)
 					__FUNCTION__, __LINE__, old_tcpack_num, new_tcp_ack_num));
 #if defined(DEBUG_COUNTER) && defined(DHDTCPACK_SUP_DBG)
 				tack_tbl.cnt[2]++;
-#endif 
+#endif /* DEBUG_COUNTER && DHDTCPACK_SUP_DBG */
 				ret = TRUE;
 			} else {
 #if defined(DEBUG_COUNTER) && defined(DHDTCPACK_SUP_DBG)
 				tack_tbl.cnt[6]++;
-#endif 
+#endif /* DEBUG_COUNTER && DHDTCPACK_SUP_DBG */
 				DHD_TRACE(("%s %d: lenth mismatch %d != %d || %d != %d"
 					" ACK %u -> %u\n", __FUNCTION__, __LINE__,
 					new_ip_hdr_len, old_ip_hdr_len,
@@ -840,10 +843,10 @@ dhd_tcpack_suppress(dhd_pub_t *dhdp, void *pkt)
 			}
 		} else if (new_tcp_ack_num == old_tcpack_num) {
 			set_dotxinrx = TRUE;
-			
+			/* TCPACK retransmission */
 #if defined(DEBUG_COUNTER) && defined(DHDTCPACK_SUP_DBG)
 			tack_tbl.cnt[3]++;
-#endif 
+#endif /* DEBUG_COUNTER && DHDTCPACK_SUP_DBG */
 		} else {
 			DHD_TRACE(("%s %d: ACK number reverse old %u(0x%p) new %u(0x%p)\n",
 				__FUNCTION__, __LINE__, old_tcpack_num, oldpkt,
@@ -854,6 +857,9 @@ dhd_tcpack_suppress(dhd_pub_t *dhdp, void *pkt)
 	}
 
 	if (i == tcpack_sup_mod->tcpack_info_cnt && i < TCPACK_INFO_MAXNUM) {
+		/* No TCPACK packet with the same IP addr and TCP port is found
+		 * in tcp_ack_info_tbl. So add this packet to the table.
+		 */
 		DHD_TRACE(("%s %d: Add pkt 0x%p(ether_hdr 0x%p) to tbl[%d]\n",
 			__FUNCTION__, __LINE__, pkt, new_ether_hdr,
 			tcpack_sup_mod->tcpack_info_cnt));
@@ -863,7 +869,7 @@ dhd_tcpack_suppress(dhd_pub_t *dhdp, void *pkt)
 		tcpack_sup_mod->tcpack_info_cnt++;
 #if defined(DEBUG_COUNTER) && defined(DHDTCPACK_SUP_DBG)
 		tack_tbl.cnt[1]++;
-#endif 
+#endif /* DEBUG_COUNTER && DHDTCPACK_SUP_DBG */
 	} else {
 		ASSERT(i == tcpack_sup_mod->tcpack_info_cnt);
 		DHD_TRACE(("%s %d: No empty tcp ack info tbl\n",
@@ -872,7 +878,7 @@ dhd_tcpack_suppress(dhd_pub_t *dhdp, void *pkt)
 	dhd_os_tcpackunlock(dhdp, flags);
 
 exit:
-	
+	/* Unless TCPACK_SUP_DELAYTX, dotxinrx is alwasy TRUE, so no need to set here */
 	if (dhdp->tcpack_sup_mode == TCPACK_SUP_DELAYTX && set_dotxinrx)
 		dhd_bus_set_dotxinrx(dhdp->bus, TRUE);
 
@@ -882,17 +888,17 @@ exit:
 bool
 dhd_tcpdata_info_get(dhd_pub_t *dhdp, void *pkt)
 {
-	uint8 *ether_hdr;	
-	uint16 ether_type;	
-	uint8 *ip_hdr;		
-	uint8 *tcp_hdr;		
-	uint32 ip_hdr_len;	
+	uint8 *ether_hdr;	/* Ethernet header of the new packet */
+	uint16 ether_type;	/* Ethernet type of the new packet */
+	uint8 *ip_hdr;		/* IP header of the new packet */
+	uint8 *tcp_hdr;		/* TCP header of the new packet */
+	uint32 ip_hdr_len;	/* IP header length of the new packet */
 	uint32 cur_framelen;
-	uint16 ip_total_len;	
-	uint32 tcp_hdr_len;		
-	uint32 tcp_seq_num;		
-	uint16 tcp_data_len;	
-	uint32 end_tcp_seq_num;	
+	uint16 ip_total_len;	/* Total length of IP packet for the new packet */
+	uint32 tcp_hdr_len;		/* TCP header length of the new packet */
+	uint32 tcp_seq_num;		/* TCP sequence number of the new packet */
+	uint16 tcp_data_len;	/* TCP DATA length that excludes IP and TCP headers */
+	uint32 end_tcp_seq_num;	/* TCP seq number of the last byte in the new packet */
 	tcpack_sup_module_t *tcpack_sup_mod;
 	tcpdata_info_t *tcpdata_info = NULL;
 	tdata_psh_info_t *tdata_psh_info;
@@ -939,7 +945,7 @@ dhd_tcpdata_info_get(dhd_pub_t *dhdp, void *pkt)
 	ip_total_len = ntoh16_ua(&ip_hdr[IPV4_PKTLEN_OFFSET]);
 	tcp_hdr_len = 4 * TCP_HDRLEN(tcp_hdr[TCP_HLEN_OFFSET]);
 
-	
+	/* This packet is mere TCP ACK, so do nothing */
 	if (ip_total_len == ip_hdr_len + tcp_hdr_len) {
 		DHD_TRACE(("%s %d: Do nothing for no data TCP ACK\n", __FUNCTION__, __LINE__));
 		goto exit;
@@ -971,7 +977,7 @@ dhd_tcpdata_info_get(dhd_pub_t *dhdp, void *pkt)
 		goto exit;
 	}
 
-	
+	/* Look for tcpdata_info that has the same ip src/dst addrs and tcp src/dst ports */
 	i = 0;
 	while (i < tcpack_sup_mod->tcpdata_info_cnt) {
 		tcpdata_info_t *tdata_info_tmp = &tcpack_sup_mod->tcpdata_info_tbl[i];
@@ -983,7 +989,7 @@ dhd_tcpdata_info_get(dhd_pub_t *dhdp, void *pkt)
 			ntoh16_ua(tdata_info_tmp->src_tcp_port),
 			ntoh16_ua(tdata_info_tmp->dst_tcp_port)));
 
-		
+		/* If both IP address and TCP port number match, we found it so break. */
 		if (memcmp(&ip_hdr[IPV4_SRC_IP_OFFSET],
 			tdata_info_tmp->src_ip_addr, IPV4_ADDR_LEN * 2) == 0 &&
 			memcmp(&tcp_hdr[TCP_SRC_PORT_OFFSET],
@@ -1007,7 +1013,7 @@ dhd_tcpdata_info_get(dhd_pub_t *dhdp, void *pkt)
 #ifdef DHDTCPACK_SUP_DBG
 			DHD_ERROR(("%s %d: PSH INFO ENQ %d\n",
 				__FUNCTION__, __LINE__, tcpack_sup_mod->psh_info_enq_num));
-#endif 
+#endif /* DHDTCPACK_SUP_DBG */
 			tcpack_sup_mod->tcpdata_info_cnt--;
 			ASSERT(tcpack_sup_mod->tcpdata_info_cnt >= 0);
 
@@ -1020,7 +1026,7 @@ dhd_tcpdata_info_get(dhd_pub_t *dhdp, void *pkt)
 			bzero(last_tdata_info, sizeof(tcpdata_info_t));
 			DHD_ERROR(("%s %d: tcpdata_info(idx %d) is aged out. ttl cnt is now %d\n",
 				__FUNCTION__, __LINE__, i, tcpack_sup_mod->tcpdata_info_cnt));
-			
+			/* Don't increase "i" here, so that the prev last tcpdata_info is checked */
 		} else
 			 i++;
 	}
@@ -1044,6 +1050,9 @@ dhd_tcpdata_info_get(dhd_pub_t *dhdp, void *pkt)
 		}
 		tcpdata_info = &tcpack_sup_mod->tcpdata_info_tbl[i];
 
+		/* No TCP flow with the same IP addr and TCP port is found
+		 * in tcp_data_info_tbl. So add this flow to the table.
+		 */
 		DHD_ERROR(("%s %d: Add data info to tbl[%d]: IP addr "IPV4_ADDR_STR" "IPV4_ADDR_STR
 			" TCP port %d %d\n",
 			__FUNCTION__, __LINE__, tcpack_sup_mod->tcpdata_info_cnt,
@@ -1067,7 +1076,7 @@ dhd_tcpdata_info_get(dhd_pub_t *dhdp, void *pkt)
 #ifdef DHDTCPACK_SUP_DBG
 	DHD_TRACE(("%s %d: PSH INFO ENQ %d\n",
 		__FUNCTION__, __LINE__, tcpack_sup_mod->psh_info_enq_num));
-#endif 
+#endif /* DHDTCPACK_SUP_DBG */
 
 	if (tdata_psh_info == NULL) {
 		DHD_ERROR(("%s %d: No more free tdata_psh_info!!\n", __FUNCTION__, __LINE__));
@@ -1079,7 +1088,7 @@ dhd_tcpdata_info_get(dhd_pub_t *dhdp, void *pkt)
 
 #if defined(DEBUG_COUNTER) && defined(DHDTCPACK_SUP_DBG)
 	tack_tbl.cnt[4]++;
-#endif 
+#endif /* DEBUG_COUNTER && DHDTCPACK_SUP_DBG */
 
 	DHD_TRACE(("%s %d: TCP PSH DATA recvd! end seq %u\n",
 		__FUNCTION__, __LINE__, tdata_psh_info->end_seq));
@@ -1103,15 +1112,15 @@ exit:
 bool
 dhd_tcpack_hold(dhd_pub_t *dhdp, void *pkt, int ifidx)
 {
-	uint8 *new_ether_hdr;	
-	uint16 new_ether_type;	
-	uint8 *new_ip_hdr;		
-	uint8 *new_tcp_hdr;		
-	uint32 new_ip_hdr_len;	
+	uint8 *new_ether_hdr;	/* Ethernet header of the new packet */
+	uint16 new_ether_type;	/* Ethernet type of the new packet */
+	uint8 *new_ip_hdr;		/* IP header of the new packet */
+	uint8 *new_tcp_hdr;		/* TCP header of the new packet */
+	uint32 new_ip_hdr_len;	/* IP header length of the new packet */
 	uint32 cur_framelen;
-	uint32 new_tcp_ack_num;		
-	uint16 new_ip_total_len;	
-	uint32 new_tcp_hdr_len;		
+	uint32 new_tcp_ack_num;		/* TCP acknowledge number of the new packet */
+	uint16 new_ip_total_len;	/* Total length of IP packet for the new packet */
+	uint32 new_tcp_hdr_len;		/* TCP header length of the new packet */
 	tcpack_sup_module_t *tcpack_sup_mod;
 	tcpack_info_t *tcpack_info_tbl;
 	int i, free_slot = TCPACK_INFO_MAXNUM;
@@ -1164,7 +1173,7 @@ dhd_tcpack_hold(dhd_pub_t *dhdp, void *pkt, int ifidx)
 
 	DHD_TRACE(("%s %d: TCP pkt!\n", __FUNCTION__, __LINE__));
 
-	
+	/* is it an ack ? Allow only ACK flag, not to suppress others. */
 	if (new_tcp_hdr[TCP_FLAGS_OFFSET] != TCP_FLAG_ACK) {
 		DHD_TRACE(("%s %d: Do not touch TCP flag 0x%x\n",
 			__FUNCTION__, __LINE__, new_tcp_hdr[TCP_FLAGS_OFFSET]));
@@ -1174,7 +1183,7 @@ dhd_tcpack_hold(dhd_pub_t *dhdp, void *pkt, int ifidx)
 	new_ip_total_len = ntoh16_ua(&new_ip_hdr[IPV4_PKTLEN_OFFSET]);
 	new_tcp_hdr_len = 4 * TCP_HDRLEN(new_tcp_hdr[TCP_HLEN_OFFSET]);
 
-	
+	/* This packet has TCP data, so just send */
 	if (new_ip_total_len > new_ip_hdr_len + new_tcp_hdr_len) {
 		DHD_TRACE(("%s %d: Do nothing for TCP DATA\n", __FUNCTION__, __LINE__));
 		goto exit;
@@ -1192,7 +1201,7 @@ dhd_tcpack_hold(dhd_pub_t *dhdp, void *pkt, int ifidx)
 		ntoh16_ua(&new_tcp_hdr[TCP_SRC_PORT_OFFSET]),
 		ntoh16_ua(&new_tcp_hdr[TCP_DEST_PORT_OFFSET])));
 
-	
+	/* Look for tcp_ack_info that has the same ip src/dst addrs and tcp src/dst ports */
 	flags = dhd_os_tcpacklock(dhdp);
 
 	tcpack_sup_mod = dhdp->tcpack_sup_module;
@@ -1207,10 +1216,10 @@ dhd_tcpack_hold(dhd_pub_t *dhdp, void *pkt, int ifidx)
 	hold = TRUE;
 
 	for (i = 0; i < TCPACK_INFO_MAXNUM; i++) {
-		void *oldpkt;	
+		void *oldpkt;	/* TCPACK packet that is already in txq or DelayQ */
 		uint8 *old_ether_hdr, *old_ip_hdr, *old_tcp_hdr;
 		uint32 old_ip_hdr_len, old_tcp_hdr_len;
-		uint32 old_tcpack_num;	
+		uint32 old_tcpack_num;	/* TCP ACK number of old TCPACK packet in Q */
 
 		if ((oldpkt = tcpack_info_tbl[i].pkt_in_q) == NULL) {
 			if (free_slot == TCPACK_INFO_MAXNUM) {
@@ -1240,7 +1249,7 @@ dhd_tcpack_hold(dhd_pub_t *dhdp, void *pkt, int ifidx)
 			ntoh16_ua(&old_tcp_hdr[TCP_SRC_PORT_OFFSET]),
 			ntoh16_ua(&old_tcp_hdr[TCP_DEST_PORT_OFFSET])));
 
-		
+		/* If either of IP address or TCP port number does not match, skip. */
 		if (memcmp(&new_ip_hdr[IPV4_SRC_IP_OFFSET],
 			&old_ip_hdr[IPV4_SRC_IP_OFFSET], IPV4_ADDR_LEN * 2) ||
 			memcmp(&new_tcp_hdr[TCP_SRC_PORT_OFFSET],
@@ -1276,6 +1285,9 @@ dhd_tcpack_hold(dhd_pub_t *dhdp, void *pkt, int ifidx)
 	}
 
 	if (free_slot < TCPACK_INFO_MAXNUM) {
+		/* No TCPACK packet with the same IP addr and TCP port is found
+		 * in tcp_ack_info_tbl. So add this packet to the table.
+		 */
 		DHD_TRACE(("%s %d: Add pkt 0x%p(ether_hdr 0x%p) to tbl[%d]\n",
 			__FUNCTION__, __LINE__, pkt, new_ether_hdr,
 			free_slot));
@@ -1296,4 +1308,4 @@ dhd_tcpack_hold(dhd_pub_t *dhdp, void *pkt, int ifidx)
 exit:
 	return hold;
 }
-#endif 
+#endif /* DHDTCPACK_SUPPRESS */
