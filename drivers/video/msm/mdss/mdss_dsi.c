@@ -138,7 +138,7 @@ static int mdss_dsi_regulator_init(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	
+	/* HTC: use board specific hook to override default call */
 	if (pwrctrl_pdata.dsi_regulator_init)
 		pwrctrl_pdata.dsi_regulator_init(pdev);
 	else
@@ -173,7 +173,7 @@ static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
-	
+	/* HTC: On Dual DSI, We can skip dsi1 panel power control */
 	if (ctrl_pdata->ndx) {
 		pr_debug("%s: Skip DSI1 power control\n", __func__);
 		return 0;
@@ -218,6 +218,10 @@ static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 				__func__, __mdss_dsi_pm_name(i));
 	}
 
+	//TODO: move to pwrctrl
+	if (gpio_is_valid(ctrl_pdata->lcmio_1v8_en))
+		gpio_set_value((ctrl_pdata->lcmio_1v8_en), 0);
+
 end:
 	return ret;
 }
@@ -237,11 +241,15 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
-	
+	/* HTC: On Dual DSI, We can skip dsi1 panel power control */
 	if (ctrl_pdata->ndx) {
 		pr_debug("%s: Skip DSI1 power control\n", __func__);
 		return 0;
 	}
+
+	//TODO: move to pwrctrl
+	if (gpio_is_valid(ctrl_pdata->lcmio_1v8_en))
+		gpio_set_value((ctrl_pdata->lcmio_1v8_en), 1);
 
 	for (i = 0; i < DSI_MAX_PM; i++) {
 		/*
@@ -288,7 +296,7 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 					__func__, ret);
 	}
 
-	
+	/*Htc Specific hook function*/
 	if (pwrctrl_pdata.dsi_power_on) {
 		rc = pwrctrl_pdata.dsi_power_on(pdata);
 		if (rc)
@@ -2024,6 +2032,39 @@ static int mdss_dsi_irq_init(struct device *dev, int irq_no,
 	return ret;
 }
 
+static void mdss_dsi_parse_rgb_gain(struct cali_gain *gain)
+{
+	struct device_node *disp_cali_offset;
+	char *disp_cali_data = NULL;
+	int disp_cali_size = 0;
+
+	disp_cali_offset = of_find_node_by_path(CALIBRATION_DATA_PATH);
+	if (disp_cali_offset) {
+		disp_cali_data = (char *) of_get_property(disp_cali_offset,
+				DISP_FLASH_DATA, &disp_cali_size);
+		pr_info("%s: disp_cali_size = %d\n", __func__, disp_cali_size);
+
+		if (disp_cali_data && (disp_cali_size == DISP_FLASH_DATA_SIZE)) {
+			/* RGB brightness calibration data */
+			int i;
+			uint16_t tmp[LIGHT_CALI_SIZE/2];
+			for (i = 0; i < LIGHT_CALI_SIZE/2; i++) {
+				tmp[i] = disp_cali_data[LIGHT_CALI_OFFSET+(i*2)] +
+					(disp_cali_data[LIGHT_CALI_OFFSET+(i*2)+1] << 8);
+				pr_info("%s: PA[%d] = 0x%x\n", __func__, i, tmp[i]);
+			}
+			gain->BKL = tmp[LIGHT_RATIO_INDEX];
+			gain->R = tmp[LIGHT_R_INDEX];
+			gain->G = tmp[LIGHT_G_INDEX];
+			gain->B = tmp[LIGHT_B_INDEX];
+			pr_info("%s: R = 0x%x, G = 0x%x B = 0x%x BL=%d \n", __func__,
+				gain->R, gain->G, gain->B, gain->BKL);
+		} else
+			pr_info("%s: disp_cali data less\n", __func__);
+	} else
+			pr_info("%s: No disp_cali data\n", __func__);
+}
+
 int dsi_panel_device_register(struct device_node *pan_node,
 				struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
@@ -2182,6 +2223,20 @@ int dsi_panel_device_register(struct device_node *pan_node,
 	} else {
 		ctrl_pdata->mode_gpio = -EINVAL;
 	}
+
+	//TODO: move to pwrctrl
+	ctrl_pdata->lcmio_1v8_en = of_get_named_gpio(ctrl_pdev->dev.of_node,
+			 "htc,lcmio_1v8_en-gpio", 0);
+	if (!gpio_is_valid(ctrl_pdata->lcmio_1v8_en))
+		pr_err("%s:%d, lcmio 1v8 gpio not specified\n",
+						__func__, __LINE__);
+	if (gpio_is_valid(ctrl_pdata->lcmio_1v8_en)) {
+		if (gpio_request(ctrl_pdata->lcmio_1v8_en, "lcmio_1v8_en")) {
+			pr_err("request lcmio_1v8_en gpio failed, rc=%d\n", rc);
+			gpio_free(ctrl_pdata->lcmio_1v8_en);
+		}
+	}
+	mdss_dsi_parse_rgb_gain(&ctrl_pdata->cali_gain);
 
 	ctrl_pdata->timing_db_mode = of_property_read_bool(
 		ctrl_pdev->dev.of_node, "qcom,timing-db-mode");

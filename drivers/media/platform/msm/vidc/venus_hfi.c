@@ -929,12 +929,15 @@ static int venus_hfi_vote_active_buses(void *dev,
 		return -EINVAL;
 	}
 
-        cached_vote_data = device->bus_load.vote_data;
-        if (!cached_vote_data) {
-                dprintk(VIDC_ERR,"Invalid bus load vote data\n");
-                rc = -ENOMEM;
-                goto err_no_mem;
-        }
+	/* (Re-)alloc memory to store the new votes (in case we internally
+	 * re-vote after power collapse, which is transparent to client) */
+	cached_vote_data = krealloc(device->bus_load.vote_data, num_data *
+			sizeof(*cached_vote_data), GFP_KERNEL);
+	if (!cached_vote_data) {
+		dprintk(VIDC_ERR, "Can't alloc memory to cache bus votes\n");
+		rc = -ENOMEM;
+		goto err_no_mem;
+	}
 
 	/* Alloc & init the load table */
 	num_bus = device->res->bus_set.count;
@@ -2342,6 +2345,9 @@ static int venus_hfi_core_init(void *device)
 			goto err_core_init;
 		}
 
+                /* HTC_START: ION debug mechanism enhancement
+                 * Assign the instance in venus_hfi_device struct to smem_client struct
+                 */
                 if (dev->inst == NULL) {
                         dprintk(VIDC_ERR, "[Vidc_Mem] In %s: Get NULL inst\n", __func__);
                 } else {
@@ -2349,6 +2355,7 @@ static int venus_hfi_core_init(void *device)
                 }
                 
 		dprintk(VIDC_DBG, "Dev_Virt: 0x%pa, Reg_Virt: 0x%pK\n",
+                /* HTC_END */
 			&dev->hal_data->firmware_base,
 			dev->hal_data->register_base);
 
@@ -3249,6 +3256,10 @@ static void venus_hfi_process_msg_event_notify(
 		HFI_EVENT_SYS_ERROR) {
 
 		venus_hfi_set_state(device, VENUS_STATE_DEINIT);
+               /* Once SYS_ERROR received from HW, it is safe to halt the AXI.
+                * With SYS_ERROR, Venus FW may have crashed and HW might be
+                * active and causing unnecessary transactions. Hence it is
+                * safe to stop all AXI transactions from venus sub-system. */
                if (venus_hfi_halt_axi(device))
                        dprintk(VIDC_WARN,
                                "Failed to halt AXI after SYS_ERROR\n");

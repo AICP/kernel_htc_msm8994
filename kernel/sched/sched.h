@@ -63,6 +63,8 @@ extern __read_mostly int scheduler_running;
 #define NICE_0_LOAD		SCHED_LOAD_SCALE
 #define NICE_0_SHIFT		SCHED_LOAD_SHIFT
 
+#define SCHED_LOAD_WINDOW_SIZE 10
+
 /*
  * These are the 'tuning knobs' of the scheduler:
  */

@@ -100,7 +100,7 @@ static inline
 void htc_trace_pages_user(struct page *page, int numpages, int free) { }
 static inline
 void htc_dump_page_user(struct page *page) { }
-#endif 
+#endif /* CONFIG_HTC_DEBUG_PAGE_USER_TRACE */
 
 static inline void set_page_poison(struct page *page)
 {

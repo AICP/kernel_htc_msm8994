@@ -110,7 +110,7 @@
 		htc,sre-on-cmds = [29 01 00 00 00 00 03 BB 80 00];
 		htc,sre-off-cmds = [29 01 00 00 00 00 03 BB 00 00];
 		htc,mdss-sre-ebi-level = <102400>;
-		htc,brt-bl-table = <30 97>, <142 1161>, <255 4095>;
+		htc,brt-bl-table = <30 87>, <142 1152>, <255 4095>;
 		htc,nits-bl-table-scale = <10>;
 		htc,nits-bl-table = <
 			0 9 19 29 38 48 58 67 77 87
@@ -360,7 +360,7 @@
 		qcom,mdss-dsi-pan-fps-update = "dfps_immediate_porch_mode_hfp";
 		qcom,mdss-dsi-min-refresh-rate = <53>;
 		qcom,mdss-dsi-max-refresh-rate = <60>;
-		htc,brt-bl-table = <30 108>, <142 1306>, <255 4095>;
+		htc,brt-bl-table = <30 87>, <142 1293>, <255 4095>;
 		htc,nits-bl-table-scale = <10>;
 		htc,nits-bl-table = <
 			0 10 21 32 43 54 65 76 87 98
@@ -604,7 +604,7 @@
 		qcom,mdss-dsi-pan-fps-update = "dfps_immediate_porch_mode_hfp";
 		qcom,mdss-dsi-min-refresh-rate = <53>;
 		qcom,mdss-dsi-max-refresh-rate = <60>;
-		htc,brt-bl-table = <30 108>, <142 1306>, <255 4095>;
+		htc,brt-bl-table = <30 87>, <142 1293>, <255 4095>;
 		htc,nits-bl-table-scale = <10>;
 		htc,nits-bl-table = <
 			0 10 21 32 43 54 65 76 87 98

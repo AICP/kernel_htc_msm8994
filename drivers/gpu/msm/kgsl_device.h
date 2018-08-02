@@ -390,9 +390,9 @@ struct kgsl_device {
 	int cff_dump_enable;
 	struct workqueue_struct *events_wq;
 
-	struct device *busmondev; 
+	struct device *busmondev; /* pseudo dev for GPU BW voting governor */
 
-	
+	/* used to switch htc decision for gpu fault */
 	int gpu_fault_no_panic;
 };
 

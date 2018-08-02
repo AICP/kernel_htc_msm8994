@@ -312,21 +312,21 @@ static int bcm_gpio_probe(struct platform_device *pdev)
 	printk("%s@%d \n", __func__, __LINE__);
     gdev = pdev;
 
-	
+	/* For WLAN ENABLE */
 	gpio_wl_en.name = WLAN_EN_GPIO_NAME;
 	gpio_wl_en.num = 0;
 	gpio_wl_en.state = WLAN_EN_LOW;
 	gpio_wl_en.init = WLAN_EN_LOW;
 	gpio_wl_en.prop = false;
 
-	
+	/* For OOB IRQ */
 	gpio_irq.name = WLAN_IRQ_GPIO_NAME;
 	gpio_irq.num = 0;
 	gpio_irq.state = WLAN_EN_LOW;
 	gpio_irq.init = WLAN_EN_LOW;
 	gpio_irq.prop = false;
 
-    
+    /* For SECI IN */
     gpio_seci_in.name = WLAN_BOOT_GPIO_NAME;
     gpio_seci_in.num = 0;
     gpio_seci_in.state = WLAN_EN_LOW;
@@ -362,7 +362,7 @@ static int bcm_gpio_probe(struct platform_device *pdev)
 #endif
 
 #ifdef BCM_ENUMERATE
-	
+	//Enumerate PCIe
 	ret = of_property_read_u32(dev->of_node, "htc,wlan-rc-num", &rc_num);
 	if (ret) {
 		pr_err("%s: Failed to find PCIe RC number!\n", __func__);
@@ -414,7 +414,7 @@ static struct platform_driver bcm_gpio_driver = {
 
 static int __init bcm_gpio_init(void)
 {
-	
+	/* Register platform device */
 	hima_wifi_init();
 
 	return platform_driver_register(&bcm_gpio_driver);

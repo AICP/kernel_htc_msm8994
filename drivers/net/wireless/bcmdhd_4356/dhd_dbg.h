@@ -78,7 +78,16 @@
 #define DHD_FWLOG_ON()		(dhd_msg_level & DHD_FWLOG_VAL)
 #define DHD_DBGIF_ON()		(dhd_msg_level & DHD_DBGIF_VAL)
 
-#else 
+/* HTC_WIFI_START */
+// ** [HPKB#28650] Reduce log size on non-debug ROM
+#ifdef HTC_DEBUG_FLAG
+#define DHD_ERROR_HW_ONE        DHD_ERROR
+#else
+#define DHD_ERROR_HW_ONE        DHD_INFO
+#endif /* HTC_DEBUG_FLAG */
+/* HTC_WIFI_END */
+
+#else /* defined(BCMDBG) || defined(DHD_DEBUG) */
 
 #define DHD_ERROR(args)		do {if (USE_NET_RATELIMIT) printf args;} while (0)
 #define DHD_TRACE(args)
@@ -99,6 +108,15 @@
 #define DHD_MSGTRACE_LOG(args)
 #define DHD_FWLOG(args)
 #define DHD_DBGIF(args)
+
+/* HTC_WIFI_START */
+// ** [HPKB#28650] Reduce log size on non-debug ROM
+#ifdef HTC_DEBUG_FLAG
+#define DHD_ERROR_HW_ONE        DHD_ERROR
+#else
+#define DHD_ERROR_HW_ONE        DHD_INFO
+#endif /* HTC_DEBUG_FLAG */
+/* HTC_WIFI_END */
 
 #define DHD_TRACE_HW4	DHD_TRACE
 #define DHD_INFO_HW4	DHD_INFO
@@ -133,6 +151,7 @@
 #define DHD_NONE(args)
 extern int dhd_msg_level;
 
+/* Defines msg bits */
 #include <dhdioctl.h>
 
-#endif 
+#endif /* _dhd_dbg_ */

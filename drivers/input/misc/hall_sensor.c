@@ -1,8 +1,6 @@
-
 /* drivers/input/misc/hall_sensor.c - Ak8789 Hall sensor driver
  *
- * Copyright (C) 2013 HTC Corporation.
- *
+ * Copyright (C) 2013-2016 HTC Corporation.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -100,7 +98,7 @@ static ssize_t read_att(struct device *dev,
 		pos += snprintf(string+pos, sizeof(string)-pos,  ", ATT_S=%d", ret);
 	}
 
-	pos = snprintf(buf, pos + 2, "%s", string);
+	pos = snprintf(buf, pos + 2, "%s\n", string);
 	return pos;
 }
 
@@ -431,7 +429,6 @@ static int hall_sensor_suspend(struct device *dev)
 {
 	struct ak_hall_data *hl = dev_get_drvdata(dev);
 
-	HL_LOG("enter");
 	if (hl->hall_enable && hl->irq_enable) {
 		if (gpio_is_valid(hl->gpio_att)) {
 			irq_set_irq_wake(gpio_to_irq(hl->gpio_att), 1);
@@ -442,8 +439,10 @@ static int hall_sensor_suspend(struct device *dev)
 			disable_irq(gpio_to_irq(hl->gpio_att_s));
 		}
 		hl->irq_enable = 0;
-		HL_LOG("disable_irq");
 	}
+
+	if (!hl->hall_enable || hl->irq_enable)
+		HL_ERR("Hall enable: %d, irq_enable: %d",hl->hall_enable, hl->irq_enable);
 
 	return 0;
 }
@@ -452,7 +451,6 @@ static int hall_sensor_resume(struct device *dev)
 {
 	struct ak_hall_data *hl = dev_get_drvdata(dev);
 
-	HL_LOG("enter");
 	if (hl->hall_enable && !hl->irq_enable) {
 		if (gpio_is_valid(hl->gpio_att)) {
 			enable_irq(gpio_to_irq(hl->gpio_att));
@@ -461,8 +459,10 @@ static int hall_sensor_resume(struct device *dev)
 			enable_irq(gpio_to_irq(hl->gpio_att_s));
 		}
 		hl->irq_enable = 1;
-		HL_LOG("enable_irq");
 	}
+
+	if (!hl->hall_enable || !hl->irq_enable)
+		HL_ERR("Hall enable: %d, irq_enable: %d", hl->hall_enable, hl->irq_enable);
 
 	return 0;
 }

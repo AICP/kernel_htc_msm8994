@@ -644,6 +644,12 @@ config VIB_TRIGGERS
           These triggers allow kernel events to drive the vibrator. If
           unsure, say N.
 
+config HTC_FLASHLIGHT
+    boolean "HTC Flashlight API"
+    default n
+    help
+      This option enables support for the htc_flahlight function.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
@@ -657,4 +663,6 @@ source "drivers/misc/qcom/Kconfig"
 source "drivers/misc/headset/Kconfig"
 source "drivers/misc/fpr_Synaptics/Kconfig"
 source "drivers/misc/fpr_CrucialTec/Kconfig"
+source "drivers/misc/fpr_FingerprintCard/Kconfig"
+source "drivers/misc/fpr_FingerprintCard_REE/Kconfig"
 endmenu

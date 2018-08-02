@@ -412,6 +412,7 @@ static void ext4_e2fsck(struct super_block *sb)
 	INIT_WORK(&sb_info->reboot_work, ext4_reboot);
 	wq = sb_info->recover_wq;
 
+	/* queue the work to reboot */
 	queue_work(wq, &sb_info->reboot_work);
 }
 #endif
@@ -3773,6 +3774,13 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 		sbi->s_cluster_bits = 0;
 	}
 	sbi->s_cluster_ratio = clustersize / blocksize;
+
+	if (sbi->s_inodes_per_group > blocksize * 8) {
+		ext4_msg(sb, KERN_ERR,
+		       "#inodes per group too big: %lu",
+		       sbi->s_inodes_per_group);
+		goto failed_mount;
+	}
 
 	/* Do we have standard group size of clustersize * 8 blocks ? */
 	if (sbi->s_blocks_per_group == clustersize << 3)

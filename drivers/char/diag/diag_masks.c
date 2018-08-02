@@ -590,6 +590,7 @@ static int diag_cmd_set_msg_mask(unsigned char *src_buf, int src_len,
 				return -ENOMEM;
 			}
 			mask->ptr = temp;
+			mask->range_tools = mask_size;
 		}
 
 		offset = req->ssid_first - mask->ssid_first;

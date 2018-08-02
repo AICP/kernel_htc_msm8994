@@ -49,6 +49,7 @@
 
 #define MHL_DRIVER_MINOR_MAX 1
 
+/* Convert a value specified in milliseconds to nanoseconds */
 #define MSEC_TO_NSEC(x)	(x * 1000000UL)
 
 static char *white_space = "' ', '\t'";
@@ -58,6 +59,7 @@ static struct class *mhl_class;
 
 static void mhl_tx_destroy_timer_support(struct mhl_dev_context *dev_context);
 
+/* Define SysFs attribute names */
 #define SYS_ATTR_NAME_CONN			connection_state
 #define SYS_ATTR_NAME_DSHPD			ds_hpd
 #define SYS_ATTR_NAME_HDCP2			hdcp2_status
@@ -78,6 +80,7 @@ static void mhl_tx_destroy_timer_support(struct mhl_dev_context *dev_context);
 #define SYS_ATTR_NAME_STARK_CTL			set_stark_ctl
 #endif
 
+/* define SysFs object names */
 #define		SYS_ATTR_NAME_IN		in
 #define		SYS_ATTR_NAME_IN_STATUS		in_status
 #define		SYS_ATTR_NAME_OUT		out
@@ -153,7 +156,12 @@ static void mhl_tx_destroy_timer_support(struct mhl_dev_context *dev_context);
 
 #define 	SYS_ATTR_NAME_HDCP_FUNC				htc_hdcp_func
 
+//#define DEBUG_MHL_GPIO
 
+/*
+ * show_connection_state() - Handle read request to the connection_state
+ *							attribute file.
+ */
 ssize_t show_connection_state(struct device *dev, struct device_attribute *attr,
 			      char *buf)
 {
@@ -165,6 +173,12 @@ ssize_t show_connection_state(struct device *dev, struct device_attribute *attr,
 		return scnprintf(buf, PAGE_SIZE, "not connected");
 }
 
+/*
+ * set_connection_state() - Handle write request to the connection_state
+ *   attribute file.
+ * Writes to this file cause a RAP message with the specified action code
+ * to be sent to the downstream device.
+ */
 ssize_t set_connection_state(struct device *dev, struct device_attribute *attr,
 			const char *buf, size_t count)
 {
@@ -175,7 +189,7 @@ ssize_t set_connection_state(struct device *dev, struct device_attribute *attr,
 	MHL_TX_DBG_INFO("received string: %s\n", buf);
 
 	if (buf != NULL) {
-		
+		/* BUGZILLA 27012 no prefix here, only on module parameter. */
 		status = kstrtoul(buf, 0, &new_connection_state);
 		if ((status != 0) || (new_connection_state > 0xFF)) {
 			MHL_TX_DBG_ERR("Invalid connection_state: 0x%02lX\n",
@@ -209,6 +223,9 @@ err_exit:
 	return status;
 }
 
+/*
+ * show_ds_hpd_state() - Handle read request to the ds_hpd attribute file.
+ */
 ssize_t show_ds_hpd_state(struct device *dev, struct device_attribute *attr,
 			      char *buf)
 {
@@ -222,6 +239,9 @@ ssize_t show_ds_hpd_state(struct device *dev, struct device_attribute *attr,
 		return scnprintf(buf, PAGE_SIZE, "%d", hpd_status);
 }
 
+/*
+ * show_ds_hdcp2_status() - Handle read request to the ds_hpd attribute file.
+ */
 ssize_t show_hdcp2_status(struct device *dev, struct device_attribute *attr,
 			      char *buf)
 {
@@ -235,6 +255,13 @@ ssize_t show_hdcp2_status(struct device *dev, struct device_attribute *attr,
 		return scnprintf(buf, PAGE_SIZE, "%x", hdcp2_status);
 }
 
+/*
+ * Wrapper for kstrtoul() that nul-terminates the input string at
+ * the first non-digit character instead of returning an error.
+ *
+ * This function is destructive to the input string.
+ *
+ */
 static int si_strtoul(char **str, int base, unsigned long *val)
 {
 	int tok_length, status, nul_offset;
@@ -284,7 +311,7 @@ ssize_t send_scratch_pad(struct device *dev, struct device_attribute *attr,
 			 const char *buf, size_t count)
 {
 	struct mhl_dev_context *dev_context = dev_get_drvdata(dev);
-	unsigned long offset = 0x100;	
+	unsigned long offset = 0x100;	/* initialize with invalid values */
 	unsigned long length = 0x100;
 	unsigned long value;
 	u8 data[MAX_SCRATCH_PAD_TRANSFER_SIZE];
@@ -304,6 +331,10 @@ ssize_t send_scratch_pad(struct device *dev, struct device_attribute *attr,
 	}
 	strncpy(pinput, buf, count);
 
+	/*
+	 * Parse the input string and extract the scratch pad register selection
+	 * parameters
+	 */
 	str = strstr(pinput, "offset=");
 	if (str != NULL) {
 		str += 7;
@@ -379,6 +410,13 @@ ssize_t send_scratch_pad(struct device *dev, struct device_attribute *attr,
 		goto err_exit_1;
 	}
 
+	/*
+	 * Make sure there is an MHL connection and that the requested
+	 * data transfer parameters don't exceed the address space of
+	 * the scratch pad.  NOTE: The address space reserved for the
+	 * Scratch Pad registers is 64 bytes but sources and sink devices
+	 * are only required to implement the 1st 16 bytes.
+	 */
 	if (!(dev_context->mhl_flags & MHL_STATE_FLAG_CONNECTED) ||
 	    (length < ADOPTER_ID_SIZE) ||
 	    (offset > (SCRATCH_PAD_SIZE - ADOPTER_ID_SIZE)) ||
@@ -572,6 +610,11 @@ ssize_t set_reg_access_page(struct device *dev, struct device_attribute *attr,
 	return status;
 }
 
+/*
+ * show_reg_access_page()	- Show the current page number to be used when
+ *	reg_access/data is accessed.
+ *
+ */
 ssize_t show_reg_access_page(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -633,6 +676,11 @@ ssize_t set_reg_access_offset(struct device *dev, struct device_attribute *attr,
 	return status;
 }
 
+/*
+ * show_reg_access_offset()	- Show the current page number to be used when
+ *	reg_access/data is accessed.
+ *
+ */
 ssize_t show_reg_access_offset(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -695,6 +743,11 @@ ssize_t set_reg_access_length(struct device *dev, struct device_attribute *attr,
 	return status;
 }
 
+/*
+ * show_reg_access_length()	- Show the current page number to be used when
+ *	reg_access/data is accessed.
+ *
+ */
 ssize_t show_reg_access_length(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -742,6 +795,10 @@ ssize_t set_reg_access_data(struct device *dev, struct device_attribute *attr,
 		return -EINVAL;
 	strncpy(pinput, buf, count);
 
+	/*
+	 * Parse the input string and extract the scratch pad register
+	 * selection parameters
+	 */
 	str = pinput;
 	for (i = 0; (i < MAX_DEBUG_TRANSFER_SIZE) && ('\0' != *str); i++) {
 
@@ -923,10 +980,20 @@ ssize_t get_debug_level(struct device *dev, struct device_attribute *attr,
 
 err_exit:
 	up(&dev_context->isr_lock);
+/* this should be a separate sysfs!!!
+	si_dump_important_regs((struct drv_hw_context *)&dev_context->
+			       drv_context);
+*/
 
 	return status;
 }
 
+/*
+ * set_debug_level() - Handle write request to the debug_level attribute file.
+ *
+ * Writes to this file cause a RAP message with the specified action code
+ * to be sent to the downstream device.
+ */
 ssize_t set_debug_level(struct device *dev, struct device_attribute *attr,
 			const char *buf, size_t count)
 {
@@ -937,7 +1004,7 @@ ssize_t set_debug_level(struct device *dev, struct device_attribute *attr,
 	MHL_TX_DBG_INFO("received string: %s\n", buf);
 
 	if (buf != NULL) {
-		
+		/* BUGZILLA 27012 no prefix here, only on module parameter. */
 		status = kstrtol(buf, 0, &new_debug_level);
 		if (status != 0) {
 			MHL_TX_DBG_ERR("Invalid debug_level: 0x%02lX\n",
@@ -1006,6 +1073,14 @@ err_exit:
 	return status;
 }
 
+/*
+ * set_debug_reg_dump()
+ *
+ * Handle write request to the debug_reg_dump attribute file.
+ *
+ * Writes to this file cause a RAP message with the specified action code
+ * to be sent to the downstream device.
+ */
 ssize_t set_debug_reg_dump(struct device *dev, struct device_attribute *attr,
 			    const char *buf, size_t count)
 {
@@ -1013,7 +1088,7 @@ ssize_t set_debug_reg_dump(struct device *dev, struct device_attribute *attr,
 	int status;
 	unsigned long new_debug_reg_dump = 0x100;
 
-	
+	/* Assume success */
 	status = count;
 
 	MHL_TX_DBG_INFO("received string: %s\n", buf);
@@ -1074,6 +1149,12 @@ err_exit:
 	return status;
 }
 
+/*
+ * set_gpio_index() - Handle write request to the gpio_index attribute file.
+ *
+ * Writes to this file cause a RAP message with the specified action code
+ * to be sent to the downstream device.
+ */
 ssize_t set_gpio_index(struct device *dev, struct device_attribute *attr,
 		       const char *buf, size_t count)
 {
@@ -1081,7 +1162,7 @@ ssize_t set_gpio_index(struct device *dev, struct device_attribute *attr,
 	int status;
 	unsigned long new_gpio_index;
 
-	
+	/* Assume success */
 	status = count;
 
 	MHL_TX_DBG_INFO("received string: %s\n", buf);
@@ -1141,6 +1222,12 @@ err_exit:
 	return status;
 }
 
+/*
+ * set_gpio_level() - Handle write request to the gpio_level attribute file.
+ *
+ * Writes to this file cause a RAP message with the specified action code
+ * to be sent to the downstream device.
+ */
 ssize_t set_gpio_level(struct device *dev, struct device_attribute *attr,
 		       const char *buf, size_t count)
 {
@@ -1148,7 +1235,7 @@ ssize_t set_gpio_level(struct device *dev, struct device_attribute *attr,
 	int status;
 	unsigned long gpio_level;
 
-	
+	/* Assume success */
 	status = count;
 
 	MHL_TX_DBG_INFO("received string: %s\n", buf);
@@ -1208,6 +1295,12 @@ ssize_t show_pp_16bpp(struct device *dev, struct device_attribute *attr,
 	return status;
 }
 
+/*
+ * set_pp_16bpp() - Handle write request to the gpio_level attribute file.
+ *
+ * Writes to this file cause a RAP message with the specified action code
+ * to be sent to the downstream device.
+ */
 ssize_t set_pp_16bpp(struct device *dev, struct device_attribute *attr,
 		       const char *buf, size_t count)
 {
@@ -1421,18 +1514,18 @@ ssize_t show_hev_3d(struct device *dev, struct device_attribute *attr,
 		status += scnprintf(&buf[status], PAGE_SIZE, "3D_DTD list:\n");
 		for (i = 0; i < (int)p_edid_data->_3d_dtd_info.num_items; ++i) {
 			status += scnprintf(&buf[status], PAGE_SIZE,
-				
+				/* pixel clk */
 				"%s %s %s " "0x%02x 0x%02x "
-				
+				/* horizontal active and blanking */
 				"0x%02x 0x%02x {0x%1x 0x%1x} "
-				
+				/* vertical active and blanking */
 				"0x%02x 0x%02x {0x%1x 0x%1x} "
-				
+				/* sync pulse width and offset */
 				"0x%02x 0x%02x {0x%1x 0x%1x} "
 				"{0x%1x 0x%1x 0x%1x 0x%1x} "
-				
+				/* Image sizes */
 				"0x%02x 0x%02x {0x%1x 0x%1x} "
-				
+				/* borders and flags */
 				"0x%1x 0x%1x {0x%1x 0x%1x 0x%1x 0x%1x %s}\n",
 				p_edid_data->_3d_dtd_list[i]._3d_info.vdi_l.
 					top_bottom ? "TB" : "--",
@@ -1535,6 +1628,15 @@ ssize_t show_hev_3d(struct device *dev, struct device_attribute *attr,
 }
 
 #ifdef DEBUG
+/*
+ * set_tx_power() - Handle write request to the tx_power attribute file.
+ *
+ * Write the string "on" or "off" to this file to power on or off the
+ * MHL transmitter.
+ *
+ * The return value is the number of characters in buf if successful or an
+ * error code if not successful.
+ */
 ssize_t set_tx_power(struct device *dev, struct device_attribute *attr,
 		     const char *buf, size_t count)
 {
@@ -1560,6 +1662,15 @@ ssize_t set_tx_power(struct device *dev, struct device_attribute *attr,
 		return count;
 }
 
+/*
+ * set_sii6031_ctl() - Handle write request to the tx_power attribute file.
+ *
+ * Write the string "on" or "off" to this file to power on or off the
+ * MHL transmitter.
+ *
+ * The return value is the number of characters in buf if successful or an
+ * error code if not successful.
+ */
 ssize_t set_sii6031_ctl(struct device *dev, struct device_attribute *attr,
 		      const char *buf, size_t count)
 {
@@ -1575,8 +1686,18 @@ ssize_t set_sii6031_ctl(struct device *dev, struct device_attribute *attr,
 		status = -ENODEV;
 	} else {
 		if (strnicmp("on", buf, count - 1) == 0) {
+			/*
+			 * Set MHL/USB switch to USB
+			 * NOTE: Switch control is implemented differently on
+			 * each version of the starter kit.
+			 */
 			set_pin(X02_USB_SW_CTRL, 1);
 		} else if (strnicmp("off", buf, count - 1) == 0) {
+			/*
+			 * Set MHL/USB switch to USB
+			 * NOTE: Switch control is implemented differently on
+			 * each version of the starter kit.
+			 */
 			set_pin(X02_USB_SW_CTRL, 0);
 		} else {
 			MHL_TX_DBG_ERR("Invalid parameter %s received\n", buf);
@@ -2648,6 +2769,12 @@ ssize_t show_hdcp_status(struct device *dev, struct device_attribute *attr, char
 	return status;
 }
 
+/*
+ * set_hdcp_status() - Handle write request to the debug_hdcp_status attribute file.
+ *
+ * Write hdcp_status to enable/disable hdcp.
+ *
+ */
 ssize_t set_hdcp_status(struct device *dev, struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
@@ -2662,6 +2789,10 @@ ssize_t set_hdcp_status(struct device *dev, struct device_attribute *attr,
 }
 
 #define MAX_EVENT_STRING_LEN 128
+/*
+ * Handler for event notifications from the MhlTx layer.
+ *
+ */
 void mhl_event_notify(struct mhl_dev_context *dev_context, u32 event,
 	u32 event_param, void *data)
 {
@@ -2716,8 +2847,13 @@ void mhl_event_notify(struct mhl_dev_context *dev_context, u32 event,
 		mdt_destroy(dev_context);
 #endif
 #if (INCLUDE_SII6031 == 1)
+		/*
+			This notification steers USB-MHL switch towards USB.
+			But for CBUS_MODE_DOWN situation we do not want to
+			go to USB yet. So skip the notification to OTG driver.
+		*/
 		if (dev_context->notify_disconnection)
-			
+			/* mhl_tx_notify_otg(dev_context, false); */
 			;
 		else
 			MHL_TX_DBG_ERR(
@@ -2791,7 +2927,7 @@ void mhl_event_notify(struct mhl_dev_context *dev_context, u32 event,
 
 	case MHL_TX_EVENT_RCPE_RECEIVED:
 		if (input_dev_rcp) {
-			
+			/* do nothing */
 		} else {
 			if (dev_context->mhl_flags & MHL_STATE_FLAG_RCP_SENT) {
 
@@ -2945,7 +3081,7 @@ void mhl_event_notify(struct mhl_dev_context *dev_context, u32 event,
 	case MHL_TX_EVENT_RBPE_RECEIVED:
 		MHL_TX_DBG_INFO("RBPE received\n");
 		if (input_dev_rbp) {
-			
+			/* do nothing */
 		} else {
 			if (dev_context->mhl_flags & MHL_STATE_FLAG_RBP_SENT) {
 
@@ -3097,10 +3233,16 @@ void mhl_event_notify(struct mhl_dev_context *dev_context, u32 event,
 	}
 }
 
+/*
+ *  File operations supported by the MHL driver
+ */
 static const struct file_operations mhl_fops = {
 	.owner = THIS_MODULE
 };
 
+/*
+ * Sysfs attribute files supported by this driver.
+ */
 struct device_attribute driver_attribs[] = {
 	__ATTR(SYS_ATTR_NAME_CONN, 0644, show_connection_state,
 		set_connection_state),
@@ -3150,13 +3292,19 @@ ssize_t show_rap_in(struct device *dev, struct device_attribute *attr,
 	return status;
 }
 
+/*
+ * set_rap_in_status() - Handle write request to the rap attribute file.
+ *
+ * Writes to this file cause a RAP message with the specified action code
+ * to be sent to the downstream device.
+ */
 ssize_t set_rap_in_status(struct device *dev, struct device_attribute *attr,
 			  const char *buf, size_t count)
 {
 	struct mhl_dev_context *dev_context = dev_get_drvdata(dev);
 	int status;
 
-	
+	/* Assume success */
 	status = count;
 
 	MHL_TX_DBG_INFO("received string: %s\n", buf);
@@ -3216,13 +3364,19 @@ ssize_t show_rap_out(struct device *dev, struct device_attribute *attr,
 	return status;
 }
 
+/*
+ * send_rap_out() - Handle write request to the rap attribute file.
+ *
+ * Writes to this file cause a RAP message with the specified action code
+ * to be sent to the downstream device.
+ */
 ssize_t send_rap_out(struct device *dev, struct device_attribute *attr,
 		     const char *buf, size_t count)
 {
 	struct mhl_dev_context *dev_context = dev_get_drvdata(dev);
 	int status;
 
-	
+	/* Assume success */
 	status = count;
 
 	MHL_TX_DBG_INFO("received string: %s\n", buf);
@@ -3280,6 +3434,9 @@ ssize_t show_rap_out_status(struct device *dev, struct device_attribute *attr,
 		MHL_TX_DBG_ERR("-ENODEV\n");
 		status = -ENODEV;
 	} else {
+		/* todo: check for un-ack'ed RAP sub command
+		 * and block until ack received.
+		 */
 		status =
 		    scnprintf(buf, PAGE_SIZE, "0x%02x\n",
 			      dev_context->rap_out_status);
@@ -3319,7 +3476,7 @@ ssize_t set_rap_input_dev(struct device *dev, struct device_attribute *attr,
 	struct mhl_dev_context *dev_context = dev_get_drvdata(dev);
 	int status;
 
-	
+	/* Assume success */
 	status = count;
 
 	MHL_TX_DBG_INFO("received string: %s\n", buf);
@@ -3406,13 +3563,19 @@ ssize_t show_rcp_in(struct device *dev, struct device_attribute *attr,
 	return status;
 }
 
+/*
+ * send_rcp_in_status() - Handle write request to the rcp attribute file.
+ *
+ * Writes to this file cause a RCP message with the specified action code
+ * to be sent to the downstream device.
+ */
 ssize_t send_rcp_in_status(struct device *dev, struct device_attribute *attr,
 			   const char *buf, size_t count)
 {
 	struct mhl_dev_context *dev_context = dev_get_drvdata(dev);
 	int status;
 
-	
+	/* Assume success */
 	status = count;
 
 	MHL_TX_DBG_INFO("received string: %s\n", buf);
@@ -3470,13 +3633,19 @@ ssize_t show_rcp_out(struct device *dev, struct device_attribute *attr,
 	return status;
 }
 
+/*
+ * send_rcp_out() - Handle write request to the rcp attribute file.
+ *
+ * Writes to this file cause a RCP message with the specified action code
+ * to be sent to the downstream device.
+ */
 ssize_t send_rcp_out(struct device *dev, struct device_attribute *attr,
 		     const char *buf, size_t count)
 {
 	struct mhl_dev_context *dev_context = dev_get_drvdata(dev);
 	int status;
 
-	
+	/* Assume success */
 	status = count;
 
 	MHL_TX_DBG_INFO("received string: %s\n", buf);
@@ -3500,7 +3669,7 @@ ssize_t send_rcp_out(struct device *dev, struct device_attribute *attr,
 					MHL_STATE_FLAG_RCP_NAK);
 			dev_context->mhl_flags |= MHL_STATE_FLAG_RCP_SENT;
 			dev_context->rcp_send_status = 0;
-			dev_context->rcp_err_code = 0; 
+			dev_context->rcp_err_code = 0; /*reset error code*/
 			if (!si_mhl_tx_rcp_send(dev_context, (u8) param)) {
 				MHL_TX_DBG_ERR("-EPERM\n");
 				status = -EPERM;
@@ -3530,6 +3699,9 @@ ssize_t show_rcp_out_status(struct device *dev, struct device_attribute *attr,
 		MHL_TX_DBG_ERR("-ENODEV\n");
 		status = -ENODEV;
 	} else {
+		/* todo: check for un-ack'ed RCP sub command
+		 * and block until ack received.
+		 */
 		if (dev_context->
 		    mhl_flags & (MHL_STATE_FLAG_RCP_ACK |
 				 MHL_STATE_FLAG_RCP_NAK)) {
@@ -3573,7 +3745,7 @@ ssize_t set_rcp_input_dev(struct device *dev, struct device_attribute *attr,
 	struct mhl_dev_context *dev_context = dev_get_drvdata(dev);
 	int status;
 
-	
+	/* Assume success */
 	status = count;
 
 	MHL_TX_DBG_INFO("received string: %s\n", buf);
@@ -3657,6 +3829,12 @@ ssize_t show_rbp_in(struct device *dev, struct device_attribute *attr,
 	return status;
 }
 
+/*
+ * send_rbp_in_status() - Handle write request to the rbp attribute file.
+ *
+ * Writes to this file cause a RAP message with the specified action code
+ * to be sent to the downstream device.
+ */
 ssize_t send_rbp_in_status(struct device *dev, struct device_attribute *attr,
 			   const char *buf, size_t count)
 {
@@ -3693,13 +3871,19 @@ ssize_t send_rbp_in_status(struct device *dev, struct device_attribute *attr,
 	return status;
 }
 
+/*
+ * send_rbp_out() - Handle write request to the rbp attribute file.
+ *
+ * Writes to this file cause a RBP message with the specified action code
+ * to be sent to the downstream device.
+ */
 ssize_t send_rbp_out(struct device *dev, struct device_attribute *attr,
 		     const char *buf, size_t count)
 {
 	struct mhl_dev_context *dev_context = dev_get_drvdata(dev);
 	int status;
 
-	
+	/* Assume success */
 	status = count;
 
 	MHL_TX_DBG_INFO("received string: %s\n", buf);
@@ -3776,6 +3960,9 @@ ssize_t show_rbp_out_status(struct device *dev, struct device_attribute *attr,
 		MHL_TX_DBG_ERR("-ENODEV\n");
 		status = -ENODEV;
 	} else {
+		/* todo: check for un-ack'ed RBP sub command
+		 * and block until ack received.
+		 */
 		if (dev_context->
 		    mhl_flags & (MHL_STATE_FLAG_RBP_ACK |
 				 MHL_STATE_FLAG_RBP_NAK)) {
@@ -3820,7 +4007,7 @@ ssize_t set_rbp_input_dev(struct device *dev, struct device_attribute *attr,
 	struct mhl_dev_context *dev_context = dev_get_drvdata(dev);
 	int status;
 
-	
+	/* Assume success */
 	status = count;
 
 	MHL_TX_DBG_INFO("received string: %s\n", buf);
@@ -3903,13 +4090,19 @@ ssize_t show_ucp_in(struct device *dev, struct device_attribute *attr,
 	return status;
 }
 
+/*
+ * send_ucp_in_status() - Handle write request to the ucp attribute file.
+ *
+ * Writes to this file cause a RAP message with the specified action code
+ * to be sent to the downstream device.
+ */
 ssize_t send_ucp_in_status(struct device *dev, struct device_attribute *attr,
 			   const char *buf, size_t count)
 {
 	struct mhl_dev_context *dev_context = dev_get_drvdata(dev);
 	int status;
 
-	
+	/* Assume success */
 	status = count;
 
 	MHL_TX_DBG_INFO("received string: %s\n", buf);
@@ -3969,13 +4162,19 @@ ssize_t show_ucp_out(struct device *dev, struct device_attribute *attr,
 	return status;
 }
 
+/*
+ * send_ucp_out() - Handle write request to the ucp attribute file.
+ *
+ * Writes to this file cause a RAP message with the specified action code
+ * to be sent to the downstream device.
+ */
 ssize_t send_ucp_out(struct device *dev, struct device_attribute *attr,
 		     const char *buf, size_t count)
 {
 	struct mhl_dev_context *dev_context = dev_get_drvdata(dev);
 	int status;
 
-	
+	/* Assume success */
 	status = count;
 
 	MHL_TX_DBG_INFO("received string: %s\n", buf);
@@ -4027,6 +4226,9 @@ ssize_t show_ucp_out_status(struct device *dev, struct device_attribute *attr,
 		MHL_TX_DBG_ERR("-ENODEV\n");
 		status = -ENODEV;
 	} else {
+		/* todo: check for un-ack'ed RAP sub command
+		 * and block until ack received.
+		 */
 		if (dev_context->
 		    mhl_flags & (MHL_STATE_FLAG_UCP_ACK |
 				 MHL_STATE_FLAG_UCP_NAK)) {
@@ -4070,7 +4272,7 @@ ssize_t set_ucp_input_dev(struct device *dev, struct device_attribute *attr,
 	struct mhl_dev_context *dev_context = dev_get_drvdata(dev);
 	int status;
 
-	
+	/* Assume success */
 	status = count;
 
 	MHL_TX_DBG_INFO("received string: %s\n", buf);
@@ -4327,6 +4529,11 @@ ssize_t show_devcap_remote(struct device *dev, struct device_attribute *attr,
 							  dev_cap_remote_offset,
 							  &regValue);
 		if (status != 0) {
+			/*
+			 * Driver is busy and cannot provide the requested
+			 * DEVCAP register value right now so inform caller
+			 * they need to try again later.
+			 */
 			status = -EAGAIN;
 		} else {
 			status = scnprintf(buf, PAGE_SIZE, "0x%02x", regValue);
@@ -4551,6 +4758,9 @@ static struct attribute_group vc_attribute_group = {
 	.attrs = vc_attrs
 };
 
+/*
+process_si_adopter_id
+*/
 
 void process_si_adopter_id(struct mhl_dev_context *dev_context,
 			struct si_adopter_id_data *p_burst)
@@ -4595,6 +4805,12 @@ void process_si_adopter_id(struct mhl_dev_context *dev_context,
 
 }
 
+/*
+ * Called from the Titan interrupt handler to parse data
+ * received from the eSMC BLOCK hardware. Process all waiting input
+ * buffers. If multiple messages are sent in the same BLOCK Command buffer,
+ * they are sorted out here also.
+ */
 static void si_mhl_tx_emsc_received(struct mhl_dev_context *context)
 {
 	struct drv_hw_context *hw_context =
@@ -4606,12 +4822,14 @@ static void si_mhl_tx_emsc_received(struct mhl_dev_context *context)
 	while (si_mhl_tx_drv_peek_block_input_buffer(context,
 		&prbuf, &length) == 0) {
 		index = 0;
+/*		dump_array(DBG_MSG_LEVEL_INFO, "si_mhl_tx_emsc_received",
+			prbuf, length); */
 		do {
 			struct MHL_burst_id_t *p_burst_id;
 			pmsg = &prbuf[index];
 			p_burst_id = (struct MHL_burst_id_t *)pmsg;
 			burst_id = (((uint16_t)pmsg[0]) << 8) | pmsg[1];
-			
+			/* Move past the BURST ID */
 			index += sizeof(*p_burst_id);
 
 			switch (burst_id) {
@@ -4648,7 +4866,15 @@ static void si_mhl_tx_emsc_received(struct mhl_dev_context *context)
 
 			case burst_id_BITS_PER_PIXEL_FMT:
 				index += (4 + (2 * pmsg[5]));
+				/*
+				 * Inform the rest of the code of the
+				 * acknowledgment
+				 */
 				break;
+				/*
+				 * Any BURST_ID reported by EMSC_SUPPORT can be
+				 * sent using eMSC BLOCK
+				 */
 			case burst_id_HEV_DTDA:{
 				struct MHL3_hev_dtd_a_data_t *p_dtda =
 					(struct MHL3_hev_dtd_a_data_t *)
@@ -4663,6 +4889,9 @@ static void si_mhl_tx_emsc_received(struct mhl_dev_context *context)
 				    sizeof(*p_dtdb) -
 				    sizeof(*p_burst_id);
 				}
+				/* for now, as a robustness excercise, adjust
+				 * index according to the this burst field
+				 */
 				break;
 			case burst_id_HEV_VIC:{
 				struct MHL3_hev_vic_data_t *p_burst;
@@ -4757,6 +4986,11 @@ static void si_mhl_tx_emsc_received(struct mhl_dev_context *context)
 				}
 				break;
 			case burst_id_EMSC_SUPPORT:{
+				/*
+				 * For robustness, adjust index
+				 * according to the num-entries this
+				 * burst field
+				 */
 				struct MHL3_emsc_support_data_t *p_burst =
 					(struct MHL3_emsc_support_data_t *)
 					p_burst_id;
@@ -4839,6 +5073,9 @@ static void check_drv_intr_flags(struct mhl_dev_context *dev_context)
 	if (dev_context->intr_info.flags & DRV_INTR_WRITE_BURST)
 		si_mhl_tx_process_write_burst_data(dev_context);
 
+	/* sometimes SET_INT and WRITE_STAT come at the
+	 * same time. Always process WRITE_STAT first.
+	 */
 	if (dev_context->intr_info.flags & DRV_INTR_WRITE_STAT)
 		si_mhl_tx_got_mhl_status(dev_context,
 			&dev_context->intr_info.dev_status);
@@ -4928,6 +5165,13 @@ static void check_drv_intr_flags(struct mhl_dev_context *dev_context)
 			break;
 		case CM_eCBUS_S:
 		case CM_eCBUS_D:
+			/*
+			   MHL3 spec requires the process of reading
+			   the remainder of XDEVCAP and all of DEVCAP
+			   to be deferred until after the first
+			   transition to eCBUS mode.
+			   Check DCAP_RDY, initiate XDEVCAP read here.
+			 */
 			if (MHL_STATUS_DCAP_RDY & dev_context->status_0)
 				si_mhl_tx_ecbus_started(dev_context);
 			if (dev_context->
@@ -4948,6 +5192,16 @@ static void check_drv_intr_flags(struct mhl_dev_context *dev_context)
 		}
 	}
 }
+/*
+ * Interrupt handler for MHL transmitter interrupts.
+ *
+ * @irq:	The number of the asserted IRQ line that caused
+ *		this handler to be called.
+ * @data:	Data pointer passed when the interrupt was enabled,
+ *		which in this case is a pointer to an mhl_dev_context struct.
+ *
+ * Always returns IRQ_HANDLED.
+ */
 static irqreturn_t mhl_irq_handler(int irq, void *data)
 {
 	struct mhl_dev_context *dev_context = (struct mhl_dev_context *)data;
@@ -4973,7 +5227,7 @@ static irqreturn_t mhl_irq_handler(int irq, void *data)
 				(&dev_context->drv_context),
 				&dev_context->intr_info);
 
-			
+			/* post process events raised by interrupt handler */
 			if (dev_context->intr_info.flags &
 				DRV_INTR_DISCONNECT) {
 				dev_context->misc_flags.flags.rap_content_on =
@@ -5002,6 +5256,10 @@ static irqreturn_t mhl_irq_handler(int irq, void *data)
 
 				check_drv_intr_flags(dev_context);
 			}
+			/*
+			 * Send any messages that may have been queued up
+			 * as the result of interrupt processing.
+			 */
 			si_mhl_tx_drive_states(dev_context);
 			if (si_mhl_tx_drv_get_cbus_mode(dev_context) >=
 			    CM_eCBUS_S) {
@@ -5015,6 +5273,7 @@ irq_done:
 	return IRQ_HANDLED;
 }
 
+/* APIs provided by the MHL layer to the lower level driver */
 
 int mhl_handle_power_change_request(struct device *parent_dev, bool power_up)
 {
@@ -5025,7 +5284,7 @@ int mhl_handle_power_change_request(struct device *parent_dev, bool power_up)
 
 	MHL_TX_DBG_INFO("power_up: %d\n", power_up);
 
-	
+	/* Power down the MHL transmitter hardware. */
 	status = down_interruptible(&dev_context->isr_lock);
 	if (status) {
 		MHL_TX_DBG_ERR("failed to acquire ISR semaphore,"
@@ -5095,6 +5354,10 @@ int mhl_tx_init(struct mhl_drv_info const *drv_info,
 	}
 
 #if (INCLUDE_HID == 1)
+	/*
+	 * Create a single-threaded work queue so that no two queued
+	 * items can run at the same time.
+	 */
 	dev_context->hid_work_queue = create_singlethread_workqueue(
 		"MHL3_HID_WORK");
 	if (dev_context->hid_work_queue == NULL) {
@@ -5205,9 +5468,9 @@ int mhl_tx_init(struct mhl_drv_info const *drv_info,
 		goto free_device;
 	}
 
-	
+	/* Initialize the MHL transmitter hardware. */
 
-	
+	/* Initialize EDID parser module */
 	dev_context->edid_parser_context = si_edid_create_context(dev_context,
 		(struct drv_hw_context *)&dev_context->drv_context);
 	rcp_input_dev_one_time_init(dev_context);
@@ -5353,6 +5616,10 @@ static void mhl_tx_destroy_timer_support(struct mhl_dev_context *dev_context)
 {
 	struct timer_obj *mhl_timer;
 
+	/*
+	 * Make sure all outstanding timer objects are canceled and the
+	 * memory allocated for them is freed.
+	 */
 	while (!list_empty(&dev_context->timer_list)) {
 		mhl_timer = list_first_entry(&dev_context->timer_list,
 					     struct timer_obj, list_link);
@@ -5381,6 +5648,10 @@ static void mhl_tx_timer_work_handler(struct work_struct *work)
 	mhl_timer->flags &= ~TIMER_OBJ_FLAG_WORK_IP;
 
 	if (mhl_timer->flags & TIMER_OBJ_FLAG_DEL_REQ) {
+		/*
+		 * Deletion of this timer was requested during the execution of
+		 * the callback handler so go ahead and delete it now.
+		 */
 		kfree(mhl_timer);
 	}
 }
@@ -5400,7 +5671,7 @@ static enum hrtimer_restart mhl_tx_timer_handler(struct hrtimer *timer)
 static int is_timer_handle_valid(struct mhl_dev_context *dev_context,
 				 void *timer_handle)
 {
-	struct timer_obj *timer = timer_handle; 
+	struct timer_obj *timer = timer_handle; /* Set to avoid lint warning. */
 
 	list_for_each_entry(timer, &dev_context->timer_list, list_link) {
 		if (timer == timer_handle)
@@ -5466,6 +5737,15 @@ int mhl_tx_delete_timer(void *context, void **timer_handle)
 		hrtimer_cancel(&timer->hr_timer);
 
 		if (timer->flags & TIMER_OBJ_FLAG_WORK_IP) {
+			/*
+			 * Request to delete timer object came from within the
+			 * timer's callback handler. If we were to proceed with
+			 * the timer deletion we would deadlock at
+			 * cancel_work_sync(). Instead, just flag that the user
+			 * wants the timer deleted. Later when the timer
+			 * callback completes the timer's work handler will
+			 * complete the process of deleting this timer.
+			 */
 			timer->flags |= TIMER_OBJ_FLAG_DEL_REQ;
 		} else {
 			cancel_work_sync(&timer->work_item);
