@@ -458,10 +458,6 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 		if (tsk->flags & PF_KTHREAD)
 			continue;
 
-		/* if task no longer has any memory ignore it */
-		if (test_task_flag(tsk, TIF_MM_RELEASED))
-			continue;
-
 		if (time_before_eq(jiffies, lowmem_deathpending_timeout)) {
 			if (test_task_flag(tsk, TIF_MEMDIE)) {
 				rcu_read_unlock();
@@ -582,7 +578,6 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 		send_sig(SIGKILL, selected, 0);
 		set_tsk_thread_flag(selected, TIF_MEMDIE);
 		rem -= selected_tasksize;
-		rcu_read_unlock();
 
 		if (should_dump_meminfo)
 			lowmem_print(1, "killing process of adj less than 7 \n" \
@@ -601,11 +596,11 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 			other_free, other_file, selected_oom_score_adj);
 	} else {
 		trace_almk_shrink(1, ret, other_free, other_file, 0);
-		rcu_read_unlock();
 	}
 
 	lowmem_print(4, "lowmem_shrink %lu, %x, return %d\n",
 		     nr_to_scan, sc->gfp_mask, rem);
+	rcu_read_unlock();
 	mutex_unlock(&scan_mutex);
 	return rem;
 }
