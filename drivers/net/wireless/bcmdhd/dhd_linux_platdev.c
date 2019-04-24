@@ -34,6 +34,7 @@
 #include <dngl_stats.h>
 #include <dhd.h>
 #include <dhd_bus.h>
+#define CUSTOM_COUNTRY_CODE 1
 #include <dhd_linux.h>
 #include <wl_android.h>
 #if defined(CONFIG_WIFI_CONTROL_FUNC)
@@ -43,6 +44,7 @@
 #include<linux/regulator/consumer.h>
 #include<linux/of_gpio.h>
 #endif /* CONFIG_DTS */
+
 
 #if !defined(CONFIG_WIFI_CONTROL_FUNC)
 #define WLAN_PLAT_NODFS_FLAG    0x01
