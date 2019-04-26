@@ -309,6 +309,10 @@
 	qcom,kddi-limit2-current-qc20 = <700>;
 };
 
+&pmi8994_haptics {
+	qcom,vmax-mv = <2200>;
+};
+
 &tlmm_pinmux {
 	hima_nc_pins_in_pd {
 		qcom,num-grp-pins = <17>;
