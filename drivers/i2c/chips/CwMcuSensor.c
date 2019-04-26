@@ -4329,7 +4329,7 @@ static irqreturn_t cwmcu_irq_handler(int irq, void *handle)
 	ret = CWMCU_i2c_read(mcu_data, CWSTM32_BATCH_MODE_COMMAND, &batch_st, 1);
 	if (ret < 0)batch_st = 0;
 
-	I(
+	D(
 	  "irq_hndl: INT_st(1, 2, 3, 4) = (0x%x, 0x%x, 0x%x, 0x%x), err_st = 0x%x"
 	  ", bch_st = 0x%x\n",
 	  INT_st1, INT_st2, INT_st3, INT_st4, err_st, batch_st);
@@ -5754,7 +5754,7 @@ static void cwmcu_one_shot(struct work_struct *work)
 #endif
 
 	if (mcu_data->w_batch_read == true) {
-		I("w_batch_read ++ \n");
+		D("w_batch_read ++ \n");
 		mcu_data->w_batch_read = false;
 
 		wake_lock(&mcu_data->batch_read_wake_lock);
@@ -5765,7 +5765,7 @@ static void cwmcu_one_shot(struct work_struct *work)
 		cwmcu_powermode_switch(mcu_data, 0);
 
 		wake_unlock(&mcu_data->batch_read_wake_lock);
-		I("w_batch_read -- \n");
+		D("w_batch_read -- \n");
 	}
 
 	wake_unlock(&mcu_data->one_shot_wake_lock);
