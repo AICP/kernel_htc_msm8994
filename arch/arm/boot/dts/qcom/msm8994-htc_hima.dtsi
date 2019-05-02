@@ -318,7 +318,7 @@
 };
 
 &pmi8994_haptics {
-	qcom,vmax-mv = <2200>;
+	qcom,vmax-mv = <2500>;
 };
 
 &tlmm_pinmux {
