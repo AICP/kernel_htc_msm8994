@@ -267,11 +267,9 @@ static char __log_oops_buf[__OOPS_LOG_BUF_LEN] __aligned(LOG_ALIGN);
 static char *log_oops_buf = __log_oops_buf;
 static u32 log_oops_buf_len = __OOPS_LOG_BUF_LEN;
 
-static int log_oops_full;
 /* if this sequence of log entry starts to wrap arounds, move to oops buffer */
 static u64 log_oops_first_seq = ULLONG_MAX;
 static u64 log_oops_last_seq;
-static u32 log_oops_next_idx;
 
 static u32 syslog_oops_buf_idx;
 
@@ -350,7 +348,6 @@ static u32 log_next(u32 idx, bool logbuf)
 	return idx + msg->len;
 }
 
-#if defined(CONFIG_OOPS_LOG_BUFFER)
 void oops_printk_start(void)
 {
 	unsigned long flags;
@@ -361,49 +358,6 @@ void oops_printk_start(void)
 	raw_spin_unlock_irqrestore(&logbuf_lock, flags);
 }
 
-static void log_oops_store(struct printk_log *msg)
-{
-	u32 free;
-	const int eom_len = strlen(log_oops_end);
-	const size_t eom_size = sizeof(struct printk_log) + eom_len;
-	char buf[eom_size + LOG_ALIGN];
-	u32 pad_len;
-	u64 ts_nsec;
-	int eom = 0;
-
-	if (log_first_seq >= log_oops_first_seq && !log_oops_full) {
-		free = log_oops_buf_len - log_oops_next_idx;
-		pad_len = (-eom_size) & (LOG_ALIGN - 1);
-		if ((free - msg->len) < (eom_size + pad_len)) {
-			ts_nsec = msg->ts_nsec;
-			msg = (struct printk_log *)buf;
-			memcpy(log_text(msg), log_oops_end, eom_len);
-			msg->len = eom_size + pad_len;
-			msg->text_len = eom_len;
-			msg->dict_len = 0;
-			msg->facility = 1;
-			msg->level = default_message_loglevel & 7;
-			msg->flags = (LOG_NEWLINE | LOG_PREFIX) & 0x1f;
-			msg->ts_nsec = ts_nsec;
-			eom = 1;
-		}
-
-		if (free >= msg->len) {
-			memcpy(log_oops_buf + log_oops_next_idx, msg, msg->len);
-			log_oops_next_idx += msg->len;
-			log_oops_last_seq = log_first_seq;
-			if (eom)
-				log_oops_full = 1;
-		} else {
-			log_oops_full = 1;
-		}
-	}
-}
-#else
-static void log_oops_store(struct printk_log *msg)
-{
-}
-#endif
 /* check whether there is enough free space for the given message */
 static int logbuf_has_space(u32 msg_size)
 {
