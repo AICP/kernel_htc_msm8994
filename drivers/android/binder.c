@@ -435,7 +435,9 @@ static void task_fd_install(
 	mutex_lock(&proc->files_lock);
 	if (proc->files)
 		__fd_install(proc->files, fd, file);
+		preempt_disable();
 	mutex_unlock(&proc->files_lock);
+	}
 }
 
 /*
