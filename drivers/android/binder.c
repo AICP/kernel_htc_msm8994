@@ -406,7 +406,6 @@ static int task_get_unused_fd_flags(struct binder_proc *proc, int flags)
 	struct files_struct *files = proc->files;
 	unsigned long rlim_cur;
 	unsigned long irqs;
-	int ret;
 
 	if (files == NULL)
 		return -ESRCH;
@@ -417,11 +416,7 @@ static int task_get_unused_fd_flags(struct binder_proc *proc, int flags)
 	rlim_cur = task_rlimit(proc->tsk, RLIMIT_NOFILE);
 	unlock_task_sighand(proc->tsk, &irqs);
 
-	preempt_enable_no_resched();
-	ret = __alloc_fd(files, 0, rlim_cur, flags);
-	preempt_disable();
-
-	return ret;
+	return __alloc_fd(files, 0, rlim_cur, flags);
 }
 
 /*
@@ -430,11 +425,8 @@ static int task_get_unused_fd_flags(struct binder_proc *proc, int flags)
 static void task_fd_install(
 	struct binder_proc *proc, unsigned int fd, struct file *file)
 {
-	if (proc->files) {
-		preempt_enable_no_resched();
+	if (proc->files)
 		__fd_install(proc->files, fd, file);
-		preempt_disable();
-	}
 }
 
 /*
@@ -2237,6 +2229,7 @@ static void binder_transaction(struct binder_proc *proc,
 	list_add_tail(&tcomplete->entry, &thread->todo);
 	if (target_wait) {
 		if (reply || !(t->flags & TF_ONE_WAY)) {
+			preempt_disable();
 			wake_up_interruptible_sync(target_wait);
 		}
 		else {
@@ -3459,11 +3452,8 @@ static int binder_mmap(struct file *filp, struct vm_area_struct *vma)
 	vma->vm_ops = &binder_vm_ops;
 	vma->vm_private_data = proc;
 
-	/* binder_update_page_range assumes preemption is disabled */
-	preempt_disable();
-	ret = binder_update_page_range(proc, 1, proc->buffer, proc->buffer + PAGE_SIZE, vma);
-	preempt_enable_no_resched();
-	if (ret) {
+       if (binder_update_page_range(proc, 1, proc->alloc.buffer,
+                                    proc->alloc.buffer + PAGE_SIZE, vma)) {
 		ret = -ENOMEM;
 		failure_string = "alloc small buf";
 		goto err_alloc_small_buf_failed;
@@ -3754,7 +3744,6 @@ static void binder_deferred_func(struct work_struct *work)
 		trace_binder_locked(__func__);
 
 		mutex_lock(&binder_deferred_lock);
-		preempt_disable();
 		if (!hlist_empty(&binder_deferred_list)) {
 			proc = hlist_entry(binder_deferred_list.first,
 					struct binder_proc, deferred_work_node);
