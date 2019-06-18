@@ -3467,7 +3467,7 @@ err_invalid_target_handle:
 	}
 }
 
-int binder_thread_write(struct binder_proc *proc,
+static int binder_thread_write(struct binder_proc *proc,
 			struct binder_thread *thread,
 			binder_uintptr_t binder_buffer, size_t size,
 			binder_size_t *consumed)
@@ -5202,10 +5202,6 @@ static void binder_deferred_func(struct work_struct *work)
 	int defer;
 
 	do {
-		trace_binder_lock(__func__);
-		mutex_lock(&binder_main_lock);
-		trace_binder_locked(__func__);
-
 		mutex_lock(&binder_deferred_lock);
 		if (!hlist_empty(&binder_deferred_list)) {
 			proc = hlist_entry(binder_deferred_list.first,
