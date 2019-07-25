@@ -827,10 +827,6 @@
 	status = "okay";
 };
 
-&qcom_crypto2fde {
-	status = "okay";
-};
-
 &qcom_crypto1pfe {
 	status = "okay";
 };
