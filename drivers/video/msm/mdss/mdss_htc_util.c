@@ -1136,7 +1136,7 @@ int htc_backlight_transfer_bl_brightness(int val, struct msm_fb_data_type *mfd, 
 
 	if (brightness_to_bl)
 		result = BACKLIGHT_CALI(result, bl_cali);
-	pr_info("%s: mode=%d, bl_cali=%d, %d transfer to %d\n",
+	pr_debug("%s: mode=%d, bl_cali=%d, %d transfer to %d\n",
 		__func__, brightness_to_bl, bl_cali, val, result);
 
 	return result;

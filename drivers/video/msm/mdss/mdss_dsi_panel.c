@@ -611,7 +611,7 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 
 	switch (ctrl_pdata->bklt_ctrl) {
 	case BL_WLED:
-		PR_DISP_INFO("%s:bl_level=%d\n", __func__, bl_level);
+		pr_debug("[DISP] %s:bl_level=%d\n", __func__, bl_level);
 		led_trigger_event(bl_led_trigger, bl_level);
 		break;
 	case BL_PWM:
