@@ -120,7 +120,7 @@ static int q6lsm_callback(struct apr_client_data *data, void *priv)
 		if (client->cb)
 			client->cb(data->opcode, data->token,
 					(void *)&read_done,
-					client->priv);
+					data->payload_size, client->priv);
 		return 0;
 	} else if (data->opcode == APR_BASIC_RSP_RESULT) {
 		token = data->token;
