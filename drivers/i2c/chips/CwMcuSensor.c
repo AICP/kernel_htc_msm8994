@@ -373,7 +373,9 @@ struct cwmcu_data {
 };
 
 static struct cwmcu_data *s_mcu_data = NULL;
+#ifdef CONFIG_VIB_TRIGGERS_CWSTM32
 static struct vib_trigger *vib_trigger = NULL;
+#endif
 BLOCKING_NOTIFIER_HEAD(double_tap_notifier_list);
 
 static int CWMCU_i2c_read(struct cwmcu_data *mcu_data,
