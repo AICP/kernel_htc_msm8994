@@ -278,7 +278,9 @@ struct cwmcu_data {
 	int gpio_mcu_status_level;
 	s32 gs_chip_layout;
 	s32 touch_enable;
+#ifdef CONFIG_VIB_TRIGGERS_CWSTM32
 	s32 vibrate_ms;
+#endif
 	u32 gs_kvalue;
 	s16 gs_kvalue_R1;
 	s16 gs_kvalue_R2;
@@ -371,7 +373,9 @@ struct cwmcu_data {
 };
 
 static struct cwmcu_data *s_mcu_data = NULL;
+#ifdef CONFIG_VIB_TRIGGERS_CWSTM32
 static struct vib_trigger *vib_trigger = NULL;
+#endif
 BLOCKING_NOTIFIER_HEAD(double_tap_notifier_list);
 
 static int CWMCU_i2c_read(struct cwmcu_data *mcu_data,
@@ -1509,6 +1513,7 @@ static ssize_t trigger_mcu_wakeup(struct device *dev,
     return count;
 }
 
+#ifdef CONFIG_VIB_TRIGGERS_CWSTM32
 static ssize_t set_vibrate_ms(struct device *dev,
         struct device_attribute *attr,
         const char *buf, size_t count)
@@ -1535,6 +1540,7 @@ static ssize_t set_vibrate_ms(struct device *dev,
 
     return count;
 }
+#endif
 
 static int CWMCU_i2c_read_power(struct cwmcu_data *mcu_data,
 			 u8 reg_addr, void *data, u8 len)
@@ -4260,11 +4266,13 @@ static void easy_access_irq_handler(struct cwmcu_data *mcu_data)
 		E("%s: no gesture motion type = %d\n", __func__, data[0]);
 	}
 
+#ifdef CONFIG_VIB_TRIGGERS_CWSTM32
 	if (vib_trigger) {
 		vib_trigger_event(vib_trigger, mcu_data->vibrate_ms);
 	} else {
 		E("%s: no vib_trigger\n", __func__);
 	}
+#endif
 
 	clear_intr = CW_MCU_INT_BIT_HTC_GESTURE_MOTION;
 	ret = CWMCU_i2c_write(mcu_data, CWSTM32_INT_ST4, &clear_intr, 1, 1);
@@ -4997,6 +5005,7 @@ static int mcu_parse_dt(struct device *dev, struct cwmcu_data *pdata)
 	} else
 		E("%s: touch_enable not found", __func__);
 
+#ifdef CONFIG_VIB_TRIGGERS_CWSTM32
 	prop = of_find_property(dt, "vibrate_ms", NULL);
 	if (prop) {
 		of_property_read_u32(dt, "vibrate_ms", &buf);
@@ -5004,6 +5013,7 @@ static int mcu_parse_dt(struct device *dev, struct cwmcu_data *pdata)
 		I("%s: vibrate_ms = %d\n", __func__, pdata->vibrate_ms);
 	} else
 		E("%s: vibrate_ms not found", __func__);
+#endif
 
 	prop = of_find_property(dt, "mcu,acceleration_axes", NULL);
 	if (prop) {
@@ -5399,7 +5409,9 @@ static struct device_attribute attributes[] = {
 #endif //SHUB_LOGGING_SUPPORT
 	__ATTR(dbg_flag, 0440, dbg_flag_show, NULL),
 	__ATTR(sensor_placement, 0220, NULL, sensor_placement_store),
+#ifdef CONFIG_VIB_TRIGGERS_CWSTM32
 	__ATTR(vibrate_ms, 0220, NULL, set_vibrate_ms),
+#endif
 	__ATTR(crash_count, 0440, crash_count_show, NULL),
 	__ATTR(i2c_log_flag, 0440, i2c_log_flag_show, i2c_log_flag_store),
 };
@@ -8152,7 +8164,9 @@ static int CWMCU_i2c_probe(struct i2c_client *client,
 	atomic_set(&mcu_data->suspended, 0);
 	atomic_set(&mcu_data->critical_sect, 0);
 
+#ifdef CONFIG_VIB_TRIGGERS_CWSTM32
 	vib_trigger_register_simple("vibrator", &vib_trigger);
+#endif
 
 #ifdef SHUB_LOGGING_SUPPORT
 	error = misc_register(&shub_log_miscdev);
