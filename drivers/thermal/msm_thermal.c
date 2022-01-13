@@ -302,8 +302,6 @@ enum ocr_request {
 	OPTIMUM_CURRENT_NR,
 };
 
-#define __ATTR_RW(attr) __ATTR(attr, 0644, attr##_show, attr##_store)
-
 #define SYNC_CORE(_cpu) \
 	(core_ptr && cpus[_cpu].parent_ptr->sync_cluster)
 
